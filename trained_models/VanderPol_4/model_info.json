@@ -1,0 +1,59 @@
+{
+    "encoder_parameters": {
+        "name": "VanderPol_4",
+        "NN_architecture": "MLP",
+        "input_size": 0,
+        "state_size": 2,
+        "encoder_hidden_sizes": [
+            40,
+            40,
+            40,
+            40
+        ],
+        "lifted_state_size": 25,
+        "activation": "ReLU",
+        "sample_time": 0.02
+    },
+    "normalizer_params": null,
+    "training_options": {
+        "n_epochs": 2000,
+        "n_recon_epoch": 50,
+        "learning_rate": 0.002,
+        "decay_rate": 0.999,
+        "batch_size": 256,
+        "lossfunc_weights": [
+            0.1,
+            1e-07,
+            1e-15
+        ],
+        "num_pred_steps": 30,
+        "cuda": true
+    },
+    "dataset_options": {
+        "name": "vanderpol",
+        "add_sequence_dimension": true,
+        "train_val_ratio": 0.8,
+        "do_nomalization": false,
+        "seq_length": 50
+    },
+    "dataset_info": {
+        "sample_time": 0.02,
+        "sequence_length": 50,
+        "state": "x1, x2",
+        "name": "Van del Pol",
+        "equation dx1dt": "2*x2",
+        "equation dx2dt": "-0.8*x1 + 2*x2 - 10*x1**2*x2 + u",
+        "train_dataset_size": 5000,
+        "val_dataset_size": 200,
+        "test_dataset_size": 121
+    },
+    "train_history": {
+        "loss_train": 1.059328224073397e-05,
+        "loss_valid": 9.743695045472123e-06,
+        "metric_valid_recon": 0.0034512155689299107,
+        "metric_valid_pred": 0.005677251610904932,
+        "metric_valid_lin": 0.0009092619875445962,
+        "error_test_pred": 0.007270385220426121,
+        "error_test_linear": 0.0015511279976926373
+    }
+}
