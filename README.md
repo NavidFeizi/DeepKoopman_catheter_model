@@ -10,4 +10,4 @@ This repository contains the codes for training the model networks usign Pytroch
 
 [Example PDF](./figures/Prediction_Eigen_function.pdf)
 
-[Example PDF](./figures/Diagram.png)
+![Diagram](./figures/Diagram.png)
