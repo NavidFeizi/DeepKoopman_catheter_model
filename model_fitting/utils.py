@@ -437,7 +437,7 @@ class DeepKoopmanExplicitLoss(nn.Module):
         for param in model_parameters:
             l2_reg += torch.norm(param)
 
-        total_loss = self.alpha1 * (loss_recon + loss_pred) + loss_lin + self.alpha2 * loss_inf + self.alpha_reg * l2_reg
+        total_loss = self.alpha1 * (loss_recon + loss_pred) + loss_lin*loss_lin + self.alpha2 * loss_inf + self.alpha_reg * l2_reg
         # total_loss = self.alpha1 * (loss_recon) + loss_lin + self.alpha_reg * l2_reg
         return total_loss
 

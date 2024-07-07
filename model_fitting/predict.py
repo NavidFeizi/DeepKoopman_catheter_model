@@ -12,7 +12,6 @@ from mpl_toolkits.mplot3d import Axes3D
 from model_fitting.predictor import Predictor
 from torch.utils.data import DataLoader, Dataset
 from model_fitting.utils import MLPDataset
-from control_sim.observer import Observer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Running on", device)
@@ -20,11 +19,12 @@ print("Running on", device)
 
 """ Adjust Parameters """
 ##################################################################################
-model_name = "catheter_1T_forced_1.2.3"
-simulation_time = 0.398
-sample_time_override = 1e-3
+model_name = "catheter_1T_unforced_3.1"
+simulation_time = 0.900
+sample_time_override = 2e-3
 # plot_index_list = [2, 21, 51, 61]
-plot_index_list = [57]
+# plot_index_list = [57]
+plot_index_list = [21, 31, 41, 51, 73]
 # plot_index_list = [5, 24, 54, 64, 74]
 
 states_name = ["$x$", "$\dot{x}$", "$z$", "$\dot{z}$"]  # Example state names
@@ -36,6 +36,11 @@ def main():
     """Load Info Files"""
     ####################################################################################
     model_dir = os.path.join(os.getcwd(), "trained_models", model_name)
+
+    #### create the model saving folder if not exists
+    PNG_dir = os.path.join(os.getcwd(), "trained_models", model_name, "PNG")
+    if not os.path.exists(PNG_dir):
+        os.makedirs(PNG_dir)
 
     #### load model_info json file
     model_info_path = os.path.join(model_dir, "model_info.json")
@@ -94,7 +99,7 @@ def main():
     """ Initialize simulation variables """
     ####################################################################################
     Yp_list = []  ## truth value of y_plus from advanced encoded x
-    Xed_list = []  ## truth value of y_plus from advanced encoded x
+    Xrecon_list = []  ## truth value of y_plus from advanced encoded x
     Yp_pred_list = []  ## predicted value of y_plus from iterating the Koopman model
     Xp_pred_list = []  ## predicted value of x_plus from decoding the iterated Koopman
     Yobs_list = []  ## predicted value of y_plus from iterating the Koopman model
@@ -106,7 +111,7 @@ def main():
             model_info["encoder_params"]["state_size"],
         )
     )
-    Xed = np.empty(
+    Xrecon = np.empty(
         (
             num_traj,
             num_pred_steps,
@@ -236,7 +241,7 @@ def main():
             Y0 = Y_adv
 
         # Yp_list = pred.lift_a_trajectory(x=x)
-        Xed_list = pred.encode_and_decode_a_trajectory(x=x)
+        Xrecon_list = pred.encode_and_decode_a_trajectory(x=x)
         for j in range(num_pred_steps):
             Xp_list.append(x[:, ((j + 1) * STF), :])
             Yp_list.append(pred._model.encoder(x[:, ((j + 1) * STF), :]))
@@ -244,7 +249,7 @@ def main():
         Xp[i, :, :] = torch.stack(Xp_list, dim=1).detach().numpy()[0, :, :]
         Xp_pred[i, :, :] = torch.stack(Xp_pred_list, dim=1).detach().numpy()[0, :, :]
         Yp[i, :, :] = torch.stack(Yp_list, dim=1).detach().numpy()[0, :, :]
-        Xed[i, :, :] = torch.stack(Xed_list, dim=1).detach().numpy()[0, :, :]
+        Xrecon[i, :, :] = torch.stack(Xrecon_list, dim=1).detach().numpy()[0, :, :]
         Yp_pred[i, :, :] = torch.stack(Yp_pred_list, dim=1).detach().numpy()[0, :, :]
         Lambdas[i, :, :] = torch.stack(Lambdas_list, dim=1).detach().numpy()[0, :, :]
         U[i, :, :] = torch.stack(U_list, dim=1).detach().numpy()[0, :, :]
@@ -259,9 +264,9 @@ def main():
     """ Plot Results """
     ####################################################################################
     time_pred = np.linspace(0, sample_time_override * num_pred_steps, num_pred_steps)
-    ED_error = np.abs(Xed - Xp)
-    X_errors = np.abs(Xp_pred - Xp)
-    Y_errors = np.abs(Yp_pred - Yp)
+    errors_Xrecon = np.abs(Xrecon - Xp)
+    errors_Xp_pred = np.abs(Xp_pred - Xp)
+    errors_Yp_pred = np.abs(Yp_pred - Yp)
 
     #### Plot - states phase and time domain """
     plot_states(
@@ -274,6 +279,7 @@ def main():
         model_dir,
         save=True,
         Xobs=None,
+        # Xrecon=Xrecon,
     )
     #### Plot - lifted states phase and time domain """
     plot_lifted_states(
@@ -287,7 +293,7 @@ def main():
         Yobs=None,
     )
     #### Plot - Errors """
-    plot_errors(Xp, X_errors, ED_error, states_name, model_dir, save=True)
+    plot_errors(Xp, errors_Xp_pred, errors_Xrecon, states_name, model_dir, save=True)
     #### Plot - Eigen functions """
     plot_eigen_functions(Yp, Lambdas, model_dir, save=True)
     #### Plot - B Matrix """
@@ -306,27 +312,28 @@ def plot_states(
     save_dir,
     save=False,
     Xobs=None,
+    Xrecon=None,
 ):
     print("Plotting states...")
-    fig = plt.figure(figsize=(12, 7.5))
+    fig = plt.figure(figsize=(7, 5))
     gs = GridSpec(
-        12,
+        6,
         2,
         figure=fig,
-        height_ratios=[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        height_ratios=[1, 1, 1, 1, 1, 1],
         width_ratios=[2.5, 1],
     )
     axs = []
-    axs.append(fig.add_subplot(gs[0:4, 1]))  # ax[0] - small plot at the top right
-    axs.append(fig.add_subplot(gs[4:8, 1]))  # ax[1] - small plot middle right
-    axs.append(fig.add_subplot(gs[8:12, 1]))  # ax[2] - small plot buttom right
-    axs.append(fig.add_subplot(gs[0:3, 0]))  # ax[3] - wide plot
-    axs.append(axs[3].twinx())  # ax[4] - Twin axis for ax[3],
-    axs.append(fig.add_subplot(gs[3:6, 0]))  # ax[5] - wide plot
-    axs.append(axs[5].twinx())  # ax[6] - Twin axis for ax[5],
-    axs.append(fig.add_subplot(gs[6:9, 0]))  # ax[7] - wide plot
-    axs.append(axs[7].twinx())  # ax[8] - Twin axis for ax[7],
-    axs.append(fig.add_subplot(gs[9:12, 0]))  # ax[9] - wide plot
+    axs.append(fig.add_subplot(gs[0:3, 1]))  # ax[0] - small plot at the top right
+    axs.append(fig.add_subplot(gs[3:6, 1]))  # ax[1] - small plot middle right
+    # axs.append(fig.add_subplot(gs[8:12, 1]))  # ax[2] - small plot buttom right
+    axs.append(fig.add_subplot(gs[0:2, 0]))  # ax[3] - wide plot
+    axs.append(axs[2].twinx())  # ax[4] - Twin axis for ax[3],
+    axs.append(fig.add_subplot(gs[2:4, 0]))  # ax[5] - wide plot
+    axs.append(axs[4].twinx())  # ax[6] - Twin axis for ax[5],
+    # axs.append(fig.add_subplot(gs[6:9, 0]))  # ax[7] - wide plot
+    # axs.append(axs[7].twinx())  # ax[8] - Twin axis for ax[7],
+    axs.append(fig.add_subplot(gs[4:6, 0]))  # ax[9] - wide plot
 
     custom_colors = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd", "#8c564b"]
     linestyles = ["-", "--", "-", "--", "-", "--"]
@@ -338,6 +345,7 @@ def plot_states(
         counter = 0
         for j in range(0, len(states_name), 2):
             axs[counter].plot(
+
                 Xp[i, :, j],
                 Xp[i, :, j + 1],
                 c=color,
@@ -352,7 +360,7 @@ def plot_states(
                 linewidth=0.5,
             )
             axs[counter].plot(
-                Xp[i, 0, j], Xp[i, 0, j + 1], c="black", marker="o", markersize=2
+                Xp[i, 0, j], Xp[i, 0, j + 1], c=color, marker="o", markersize=2
             )
             axs[counter].plot(
                 Xp_pred[i, 0, j],
@@ -373,9 +381,25 @@ def plot_states(
                 axs[counter].plot(
                     Xobs[i, 0, j], Xobs[i, 0, j + 1], c="red", marker="o", markersize=2
                 )
+            if Xrecon is not None:
+                axs[counter].plot(
+                    Xrecon[i, :, j],
+                    Xrecon[i, :, j + 1],
+                    c="black",
+                    label="recon" if index == 0 else "",
+                    linewidth=1,
+                    linestyle=linestyles[1],
+                )
+                axs[counter].plot(
+                    Xrecon[i, 0, j],
+                    Xrecon[i, 0, j + 1],
+                    c="black",
+                    marker="o",
+                    markersize=2,
+                )
             counter = counter + 1
 
-        counter = 3
+        counter = 2
         for j in range(0, len(states_name), 1):
             axs[counter].plot(
                 time,
@@ -409,10 +433,22 @@ def plot_states(
                 axs[counter].plot(
                     time[0], Xobs[i, 0, j], c="red", marker="o", markersize=2
                 )
+            if Xrecon is not None:
+                axs[counter].plot(
+                    time,
+                    Xrecon[i, :, j],
+                    c="black",
+                    label=states_name[j] + "$_{obs}$" if index == 0 else "",
+                    linewidth=1,
+                    linestyle=linestyles[counter - 3],
+                )
+                axs[counter].plot(
+                    time[0], Xrecon[i, 0, j], c="black", marker="o", markersize=2
+                )
             counter = counter + 1
 
         for j in range(0, len(inputs_name), 1):
-            axs[9].plot(
+            axs[6].plot(
                 time,
                 U[i, :, j],
                 c=color,
@@ -420,7 +456,7 @@ def plot_states(
                 linewidth=1,
                 linestyle="-",
             )
-            axs[9].plot(time[0], U[i, 0, j], c=color, marker="o", markersize=2)
+            axs[6].plot(time[0], U[i, 0, j], c=color, marker="o", markersize=2)
 
     # Set titles, labels, and other properties for each subplot
     counter = 0
@@ -436,7 +472,7 @@ def plot_states(
         # axs[counter].set_aspect("equal", adjustable="box")
         counter = counter + 1
 
-    counter = 3
+    counter = 2
     for j in range(0, len(states_name), 2):
         axs[counter].set_title("States vs time")
         axs[counter].set_ylabel(states_name[j] + " $[mm]$")
@@ -451,12 +487,12 @@ def plot_states(
         counter = counter + 2
     axs[counter - 2].set_xlabel("Time [s]")
 
-    axs[9].set_title("Inputs vs time")
-    axs[9].set_xlabel("Time [s]")
-    axs[9].set_ylabel("inputs [mm]")
-    axs[9].legend(loc="best")
-    axs[9].minorticks_on()
-    axs[9].grid(which="both", color="lightgray", linestyle="--", linewidth=0.5)
+    axs[6].set_title("Inputs vs time")
+    axs[6].set_xlabel("Time [s]")
+    axs[6].set_ylabel("inputs [mm]")
+    axs[6].legend(loc="best")
+    axs[6].minorticks_on()
+    axs[6].grid(which="both", color="lightgray", linestyle="--", linewidth=0.5)
 
     plt.tight_layout()  # Adjust layout to make room for the colorbar
     # plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.4, hspace=0.4)
@@ -464,30 +500,32 @@ def plot_states(
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Prediction_States.pdf"), format="pdf")
+        plt.savefig(os.path.join(save_dir, "PNG/Prediction_States.png"), format="png")
 
-    fig = plt.figure(figsize=(12, 7.5))
-    gs = GridSpec(1, 1, figure=fig, height_ratios=[1], width_ratios=[1])
-    ax = fig.add_subplot(
-        gs[0, 0], projection="3d"
-    )  # ax - single 3D plot, ensure to add 3D projection
-    axs = []
-    axs.append(ax)
-    # for index, i in enumerate(plot_index_list):
-    #     color = custom_colors[index % len(custom_colors)]
-    #     axs[0].plot(Xp[i, :, 4], Xp[i, :, 2], Xp[i, :, 0], c=color, label="Truth " + str(i), linewidth=1)
-    #     axs[0].plot(Xp_pred[i, :, 4], Xp_pred[i, :, 2], Xp_pred[i, :, 0], c=color, linestyle='--', label="Prediction " + str(i), linewidth=1)
-    # axs[0].plot(0.0, 0.0, 0.0, c='black', label="Base",  marker='o', markersize=2)
+    ## 3D figure
+    # fig = plt.figure(figsize=(12, 7.5))
+    # gs = GridSpec(1, 1, figure=fig, height_ratios=[1], width_ratios=[1])
+    # ax = fig.add_subplot(
+    #     gs[0, 0], projection="3d"
+    # )  # ax - single 3D plot, ensure to add 3D projection
+    # axs = []
+    # axs.append(ax)
+    # # for index, i in enumerate(plot_index_list):
+    # #     color = custom_colors[index % len(custom_colors)]
+    # #     axs[0].plot(Xp[i, :, 4], Xp[i, :, 2], Xp[i, :, 0], c=color, label="Truth " + str(i), linewidth=1)
+    # #     axs[0].plot(Xp_pred[i, :, 4], Xp_pred[i, :, 2], Xp_pred[i, :, 0], c=color, linestyle='--', label="Prediction " + str(i), linewidth=1)
+    # # axs[0].plot(0.0, 0.0, 0.0, c='black', label="Base",  marker='o', markersize=2)
 
-    # Set titles, labels, and other properties for each subplot
-    axs[0].set_title("3D Tip Position")
-    # axs[0].set_xlabel(states_name[4] + " $[mm]$")
-    # axs[0].set_ylabel(states_name[2] + " $[mm]$")
-    # axs[0].set_zlabel(states_name[0] + " $[mm]$")
-    axs[0].minorticks_on()
-    # axs[0].set_aspect("equal", adjustable="box")
-    axs[0].grid(which="both", color="lightgray", linestyle="--", linewidth=0.5)
-    if save:
-        plt.savefig(os.path.join(save_dir, "3D_Tip_Posision.pdf"), format="pdf")
+    # # Set titles, labels, and other properties for each subplot
+    # axs[0].set_title("3D Tip Position")
+    # # axs[0].set_xlabel(states_name[4] + " $[mm]$")
+    # # axs[0].set_ylabel(states_name[2] + " $[mm]$")
+    # # axs[0].set_zlabel(states_name[0] + " $[mm]$")
+    # axs[0].minorticks_on()
+    # # axs[0].set_aspect("equal", adjustable="box")
+    # axs[0].grid(which="both", color="lightgray", linestyle="--", linewidth=0.5)
+    # if save:
+    #     plt.savefig(os.path.join(save_dir, "3D_Tip_Posision.pdf"), format="pdf")
 
 
 def plot_lifted_states(
@@ -646,11 +684,14 @@ def plot_lifted_states(
         plt.savefig(
             os.path.join(save_dir, "Prediction_Lifted_States.pdf"), format="pdf"
         )
+        plt.savefig(
+            os.path.join(save_dir, "PNG/Prediction_Lifted_States.png"), format="png"
+        )
 
 
 def plot_errors(Xp, X_errors, ED_errors, states_name, save_dir, save=False):
     print("Plotting errors...")
-    fig, axs = plt.subplots(2, 2, figsize=(8, 7))
+    fig, axs = plt.subplots(2, 2, figsize=(7, 5))
 
     # Group 1: Dimensions 0, 2, and 4
     indices = list(range(0, X_errors.shape[2], 2))
@@ -818,16 +859,16 @@ def plot_eigen_functions(Yp, Lambdas, save_dir, save=False):
         "$y_6$",
     ]  # Example state names
 
-    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+    fig, axs = plt.subplots(1, 2, figsize=(7, 4))
 
-    sc1 = axs[0, 0].scatter(
+    sc1 = axs[0].scatter(
         Yp[:, :, 0].flatten(),
         Yp[:, :, 1].flatten(),
         c=Lambdas[:, :, 0].flatten(),
         cmap="viridis",
         s=2,
     )
-    sc2 = axs[1, 0].scatter(
+    sc2 = axs[1].scatter(
         Yp[:, :, 0].flatten(),
         Yp[:, :, 1].flatten(),
         c=Lambdas[:, :, 1].flatten(),
@@ -844,34 +885,34 @@ def plot_eigen_functions(Yp, Lambdas, save_dir, save=False):
 
     # Add color bars for each scatter plot
     cbar_kwargs = {"fraction": 0.046, "pad": 0.04}  # Adjust these values as needed
-    fig.colorbar(sc1, ax=axs[0, 0], **cbar_kwargs)
-    fig.colorbar(sc2, ax=axs[1, 0], **cbar_kwargs)
+    fig.colorbar(sc1, ax=axs[0], **cbar_kwargs)
+    fig.colorbar(sc2, ax=axs[1], **cbar_kwargs)
     # fig.colorbar(sc3, ax=axs[0,1], **cbar_kwargs)
     # fig.colorbar(sc4, ax=axs[1,1], **cbar_kwargs)
 
-    axs[0, 0].set_title("$\mu_1$")
-    axs[0, 0].set_xlabel(lifted_states_name[0])
-    axs[0, 0].set_ylabel(lifted_states_name[1])
-    axs[0, 0].minorticks_on()
-    axs[0, 0].set_aspect("equal", adjustable="box")
+    axs[0].set_title("$\mu_1$")
+    axs[0].set_xlabel(lifted_states_name[0])
+    axs[0].set_ylabel(lifted_states_name[1])
+    axs[0].minorticks_on()
+    axs[0].set_aspect("equal", adjustable="box")
 
-    axs[1, 0].set_title("$\omega_1$")
-    axs[1, 0].set_xlabel(lifted_states_name[0])
-    axs[1, 0].set_ylabel(lifted_states_name[1])
-    axs[1, 0].minorticks_on()
-    axs[1, 0].set_aspect("equal", adjustable="box")
+    axs[1].set_title("$\omega_1$")
+    axs[1].set_xlabel(lifted_states_name[0])
+    axs[1].set_ylabel(lifted_states_name[1])
+    axs[1].minorticks_on()
+    axs[1].set_aspect("equal", adjustable="box")
 
-    axs[0, 1].set_title("$\mu_2$")
-    axs[0, 1].set_xlabel(lifted_states_name[2])
-    axs[0, 1].set_ylabel(lifted_states_name[3])
-    axs[0, 1].minorticks_on()
-    axs[0, 1].set_aspect("equal", adjustable="box")
+    # axs[0, 1].set_title("$\mu_2$")
+    # axs[0, 1].set_xlabel(lifted_states_name[2])
+    # axs[0, 1].set_ylabel(lifted_states_name[3])
+    # axs[0, 1].minorticks_on()
+    # axs[0, 1].set_aspect("equal", adjustable="box")
 
-    axs[1, 1].set_title("$\omega_2$")
-    axs[1, 1].set_xlabel(lifted_states_name[2])
-    axs[1, 1].set_ylabel(lifted_states_name[3])
-    axs[1, 1].minorticks_on()
-    axs[1, 1].set_aspect("equal", adjustable="box")
+    # axs[1, 1].set_title("$\omega_2$")
+    # axs[1, 1].set_xlabel(lifted_states_name[2])
+    # axs[1, 1].set_ylabel(lifted_states_name[3])
+    # axs[1, 1].minorticks_on()
+    # axs[1, 1].set_aspect("equal", adjustable="box")
 
     plt.tight_layout()  # Adjust layout to make room for the colorbar
     plt.draw()
@@ -880,6 +921,7 @@ def plot_eigen_functions(Yp, Lambdas, save_dir, save=False):
         plt.savefig(
             os.path.join(save_dir, "Prediction_Eigen function.pdf"), format="pdf"
         )
+        plt.savefig(os.path.join(save_dir, "PNG/Prediction_Eigen.png"), format="png")
 
 
 def plot_B_Matrix(Yp, B, save_dir, save=False):
@@ -894,16 +936,16 @@ def plot_B_Matrix(Yp, B, save_dir, save=False):
         "$y_6$",
     ]  # Example state names
 
-    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+    fig, axs = plt.subplots(1, 2, figsize=(7, 4))
 
-    sc1 = axs[0, 0].scatter(
+    sc1 = axs[0].scatter(
         Yp[:, :, 0].flatten(),
         Yp[:, :, 1].flatten(),
         c=B[:, :, 0].flatten(),
         cmap="viridis",
         s=2,
     )
-    sc2 = axs[1, 0].scatter(
+    sc2 = axs[1].scatter(
         Yp[:, :, 0].flatten(),
         Yp[:, :, 1].flatten(),
         c=B[:, :, 1].flatten(),
@@ -932,40 +974,40 @@ def plot_B_Matrix(Yp, B, save_dir, save=False):
 
     # Add color bars for each scatter plot
     cbar_kwargs = {"fraction": 0.046, "pad": 0.04}  # Adjust these values as needed
-    fig.colorbar(sc1, ax=axs[0, 0], **cbar_kwargs)
-    fig.colorbar(sc2, ax=axs[1, 0], **cbar_kwargs)
+    fig.colorbar(sc1, ax=axs[0], **cbar_kwargs)
+    fig.colorbar(sc2, ax=axs[1], **cbar_kwargs)
     # fig.colorbar(sc3, ax=axs[0, 1], **cbar_kwargs)
-    # fig.colorbar(sc4, ax=axs[1, 1], **cbar_kwargs)
+    # fig.colorbar(sc4, ax=axs[1, 1], **cbar_kwarg
+    axs[0].set_title("$B_{1,1}$")
+    axs[0].set_xlabel(lifted_states_name[0])
+    axs[0].set_ylabel(lifted_states_name[1])
+    axs[0].minorticks_on()
+    axs[0].set_aspect("equal", adjustable="box")
 
-    axs[0, 0].set_title("$B_{1,1}$")
-    axs[0, 0].set_xlabel(lifted_states_name[0])
-    axs[0, 0].set_ylabel(lifted_states_name[1])
-    axs[0, 0].minorticks_on()
-    axs[0, 0].set_aspect("equal", adjustable="box")
+    axs[1].set_title("$B_{2,1}$")
+    axs[1].set_xlabel(lifted_states_name[0])
+    axs[1].set_ylabel(lifted_states_name[1])
+    axs[1].minorticks_on()
+    axs[1].set_aspect("equal", adjustable="box")
 
-    axs[1, 0].set_title("$B_{2,1}$")
-    axs[1, 0].set_xlabel(lifted_states_name[0])
-    axs[1, 0].set_ylabel(lifted_states_name[1])
-    axs[1, 0].minorticks_on()
-    axs[1, 0].set_aspect("equal", adjustable="box")
+    # axs[0, 1].set_title("$B_{3,1}$")
+    # axs[0, 1].set_xlabel(lifted_states_name[0])
+    # axs[0, 1].set_ylabel(lifted_states_name[1])
+    # axs[0, 1].minorticks_on()
+    # axs[0, 1].set_aspect("equal", adjustable="box")
 
-    axs[0, 1].set_title("$B_{3,1}$")
-    axs[0, 1].set_xlabel(lifted_states_name[0])
-    axs[0, 1].set_ylabel(lifted_states_name[1])
-    axs[0, 1].minorticks_on()
-    axs[0, 1].set_aspect("equal", adjustable="box")
-
-    axs[1, 1].set_title("$B_{4,1}$")
-    axs[1, 1].set_xlabel(lifted_states_name[0])
-    axs[1, 1].set_ylabel(lifted_states_name[1])
-    axs[1, 1].minorticks_on()
-    axs[1, 1].set_aspect("equal", adjustable="box")
+    # axs[1, 1].set_title("$B_{4,1}$")
+    # axs[1, 1].set_xlabel(lifted_states_name[0])
+    # axs[1, 1].set_ylabel(lifted_states_name[1])
+    # axs[1, 1].minorticks_on()
+    # axs[1, 1].set_aspect("equal", adjustable="box")
 
     plt.tight_layout()  # Adjust layout to make room for the colorbar
     plt.draw()
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Prediction_B_Matrix.pdf"), format="pdf")
+        plt.savefig(os.path.join(save_dir, "PNG/Prediction_B_Matrix.png"), format="png")
 
 
 def plot_encoder_map(Yp, Xp, save_dir, save=False):
@@ -980,7 +1022,7 @@ def plot_encoder_map(Yp, Xp, save_dir, save=False):
         "$y_6$",
     ]  # Example state names
 
-    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+    fig, axs = plt.subplots(2, 2, figsize=(7, 7))
 
     sc1 = axs[0, 0].scatter(
         Yp[:, :, 0].flatten(),
@@ -1052,6 +1094,7 @@ def plot_encoder_map(Yp, Xp, save_dir, save=False):
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Decoder_map.pdf"), format="pdf")
+        plt.savefig(os.path.join(save_dir, "PNG/Decoder_map.png"), format="png")
 
 
 if __name__ == "__main__":

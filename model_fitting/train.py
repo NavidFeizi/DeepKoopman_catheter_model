@@ -1,4 +1,6 @@
 import os, sys, json
+print(os.getcwd())
+sys.path.append(os.getcwd())
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.optim.lr_scheduler import ExponentialLR
@@ -42,37 +44,37 @@ print("Running on", device)
 
 """Set Paramters"""
 ####################################################################################
-model_name = "catheter_1T_forced_1.2.355"
+model_name = "catheter_1T_unforced_3.1"
 model_details = {
     "model_name": model_name,
     "desc": "one tendon with negative - unforced - mlp encoder - adjust encoder size",
 }
 ### dataset related parameters
 dataset_options = {
-    "dataset_name": "catheter_1T_mixed_1.1",
+    "dataset_name": "catheter_1T_unforced_3.1",
     # "dataset_name": "catheter_1T_unforced_2.1",
     "add_sequence_dimension": True,  # True for TCN and LSTM
-    "fit_nomalization": None,  #'X', 'U', 'All',   'X' for unforced system - None for forced system to use the unforced params
+    "fit_nomalization": 'X',  #'X', 'U', 'All',   'X' for unforced system - None for forced system to use the unforced params
     "prenomalization": True,
     "sample_step": 1,
     "sample_time": None,
 }
 ### training options
 training_options = {
-    # "transfer_from": None,
-    "transfer_from": "catheter_1T_unforced_1.2.2",
-    "transfer_input_aux": False,
-    "n_epochs": 4000,
-    "n_recon_epoch": 00,  # number of first epocs only with reconstruction loss
+    "transfer_from": None,
+    # "transfer_from": "catheter_1T_forced_1.2.3",
+    "transfer_input_aux": True,
+    "n_epochs": 3000,
+    "n_recon_epoch": 40,  # number of first epocs only with reconstruction loss
     "learning_rate": 1e-3,
     "decay_rate": 0.9988,
     "batch_size": 256,
     "lossfunc_weights": ([1e-1, 1e-7, 1e-13]),
-    "num_pred_steps": 20,
+    "num_pred_steps": 10,
     "train_encoder": True,
     "train_decoder": True,
-    "train_states_auxilary": False,
-    "train_inputs_auxilary": True,
+    "train_states_auxilary": True,
+    "train_inputs_auxilary": False,
     "cuda": True,
 }
 ### model params for Koopman operator
@@ -86,7 +88,7 @@ koopman_params = {
 encoder_params = {
     "architecture": "MLP",  # DoubleMLP, MLP
     "state_size": 4,
-    "hidden_sizes": ([64, 64, 64, 64, 64]),
+    "hidden_sizes": ([128, 128, 128, 128, 128]),
     # "hidden_sizes": ([160, 160, 160, 160, 160]),
     # "hidden_sizes": ([80, 80, 80, 80]),
     "lifted_state_size": koopman_params["num_realeigens"]
@@ -96,7 +98,7 @@ encoder_params = {
 }
 ### changes in decoder paramters
 decoder_params = encoder_params.copy()
-decoder_params["hidden_sizes"] = [64, 64, 64, 64, 64]
+decoder_params["hidden_sizes"] = [128, 128, 128, 128, 128]
 decoder_params["architecture"] = "MLP"
 ### model params for the auxilary network to estimate the eigen values of the A matrix
 states_auxilary_params = {
@@ -108,7 +110,7 @@ states_auxilary_params = {
 inputs_auxilary_params = {
     "architecture": "MLP",
     "system_input_size": 1,
-    "hidden_sizes": ([128, 128, 128, 128]),
+    "hidden_sizes": ([30, 30, 30]),
     "activation": "ReLU",  # ReLU, Tanh, Sigmoid, LeakyReLU ...
 }
 
@@ -268,7 +270,7 @@ koopmanOperator = TrainableKoopmanDynamics(
     num_realeigens=koopman_params["num_realeigens"],
     sample_time=koopman_params["sample_time"],
     structure=koopman_params["structure"],  # "Jordan", "Controlable"
-    device = device
+    # device = device
 ).to(device)
 
 # koopmanOperator = LinearKoopman(dimension=encoder_params["lifted_state_size"]).to(device)
