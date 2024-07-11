@@ -8,22 +8,25 @@ import matplotlib.pyplot as plt
 import logging
 
 logging.basicConfig(level=logging.INFO)
-
 logger = logging.getLogger(__name__)
 
 sys.path.append(os.getcwd())
 from trainer import Trainer
 from model_fitting.utils import (
     MLPDataset,
-    Weighted_MSE_Loss,
-    MAE_Metrix,
     init_tn_weights,
     init_dl_weights,
     init_he_weights,
     inverse_normalize,
+)
+
+from model_fitting.loss_functions import (
     DeepKoopmanExplicitLoss,
     DeepKoopmanExplicitMetric,
+    WeightedMseLoss,
+    MaeMetric,
 )
+
 from model_fitting.models import (
     MLP,
     DoubleMLP,
@@ -37,111 +40,12 @@ from model_fitting.models import (
     CombinedKoopman_withAux_withInput,
 )
 
-# Set device
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from config import (MODEL_DETAILS, dataset_options, training_options, koopman_params,
+                    encoder_params, decoder_params, states_auxiliary_params,
+                    inputs_auxiliary_params, DEVICE, model_dir)
+
 logger.info(" Running on %s", DEVICE)
 
-
-# Paramters
-MODEL_DETAILS = {
-    "model_name": "catheter_1T_forced_3.1.3",
-    "desc": "one tendon with negative - unforced - mlp encoder - adjust encoder size",
-}
-
-# Dataset related parameters
-dataset_options = {
-    "dataset_name": "catheter_1T_forced_3.1",
-    # "dataset_name": "catheter_1T_unforced_2.1",
-    "add_sequence_dimension": True,  # True for TCN and LSTM
-    "fit_normalization": None,  #'X', 'U', 'All',   'X' for unforced system - None for forced system to use the unforced params
-    "prenormalization": True,
-    "sample_step": 1,
-    "sample_time": None,
-}
-
-# Training options
-training_options = {
-    # "transfer_from": None,
-    "transfer_from": "catheter_1T_unforced_3.1",
-    "transfer_input_aux": False,
-    "transfer_states_aux": True,
-    "transfer_auto_encoder": True,
-    "n_epochs": 30,
-    "n_recon_epoch": 00,  # number of first epocs only with reconstruction loss
-    "learning_rate": 4e-4,
-    "decay_rate": 0.9988,
-    "batch_size": 450,
-    "lossfunc_weights": ([1e-1, 1e-7, 1e-13]),
-    "num_pred_steps": 60,
-    "train_encoder": True,
-    "train_decoder": True,
-    "train_states_auxiliary": False,
-    "train_inputs_auxiliary": True,
-    "cuda": True,
-}
-
-# Koopman operator parameters
-koopman_params = {
-    "num_complexeigens_pairs": 1,
-    "num_realeigens": 0,
-    "sample_time": None,  # loads from the dataste options
-    "structure": "Jordan",  # "Jordan" or "Controlable"
-}
-
-# Encoder parameters
-encoder_params = {
-    "architecture": "MLP",  # DoubleMLP, MLP
-    "state_size": 4,
-    "hidden_sizes": ([128, 128, 128, 128, 128]),
-    # "hidden_sizes": ([64, 64, 64, 64, 64]),
-    # "hidden_sizes": ([80, 80, 80, 80]),
-    "lifted_state_size": koopman_params["num_realeigens"]
-    + 2 * koopman_params["num_complexeigens_pairs"],
-    "activation": "ReLU",  # ReLU, Tanh, Sigmoid, LeakyReLU ...
-    "sample_time_new": None,
-}
-
-# Decoder paramters
-decoder_params = encoder_params.copy()
-decoder_params["hidden_sizes"] = [128, 128, 128, 128, 128]
-decoder_params["architecture"] = "MLP"  # MLP or DualMLP
-
-# model params for the auxiliary network to estimate the eigen values of the A matrix
-states_auxiliary_params = {
-    "architecture": "MLP",
-    "hidden_sizes": ([30, 30, 30]),
-    "activation": "ReLU",  # ReLU, Tanh, Sigmoid, LeakyReLU ...
-}
-
-# model params for the auxiliary network to estimate the B matrix
-inputs_auxiliary_params = {
-    "architecture": "MLP",
-    "system_input_size": 1,
-    "hidden_sizes": ([128, 128, 128, 128]),
-    "activation": "ReLU",  # ReLU, Tanh, Sigmoid, LeakyReLU ...
-}
-
-# driven paramters
-states_auxiliary_params["num_complexeigens_pairs"] = koopman_params[
-    "num_complexeigens_pairs"
-]
-states_auxiliary_params["num_realeigens"] = koopman_params["num_realeigens"]
-states_auxiliary_params["state_size"] = encoder_params["lifted_state_size"]
-states_auxiliary_params["output_size"] = encoder_params["lifted_state_size"]
-inputs_auxiliary_params["lifted_state_size"] = encoder_params["lifted_state_size"]
-inputs_auxiliary_params["output_shape"] = [
-    encoder_params["lifted_state_size"],
-    # encoder_params["state_size"],         # this is for when you want to train B instead of B_phi. Other parts of the code must be corrected accordingly
-    inputs_auxiliary_params["system_input_size"],
-]
-
-# Create the model saving folder
-model_dir = os.path.join(os.getcwd(), "trained_models", MODEL_DETAILS["model_name"])
-if not os.path.exists(model_dir):
-    os.makedirs(model_dir)
-
-
-####################################################################################
 def main():
     datasets_dir = os.path.join(
         os.getcwd(), "datasets", dataset_options["dataset_name"]
@@ -193,9 +97,10 @@ def main():
 
     # Loss Function, Optimizer, and Learning Rate Scheduler
     loss_function = DeepKoopmanExplicitLoss(
-        alpha1=training_options["lossfunc_weights"][0],
-        alpha2=training_options["lossfunc_weights"][1],
+        alpha_1=training_options["lossfunc_weights"][0],
+        alpha_2=training_options["lossfunc_weights"][1],
         alpha_reg=training_options["lossfunc_weights"][2],
+        weights_x=torch.tensor(([1,10,1,10])).to(DEVICE)
     )
     loss_type = "MSE"
     metric_function = DeepKoopmanExplicitMetric()
@@ -239,7 +144,7 @@ def main():
         save_dir=model_dir,
         model_parameters=model_parameters,
         training_parameters=training_options,
-        normalilzer_scale=(
+        normalizer_scale=(
             normalizer_params["params_y"]["max"][0]
             - normalizer_params["params_y"]["min"][0]
         ),
@@ -248,14 +153,21 @@ def main():
 
     # Train the model
     loss_train, loss_validation, metric_validation = trainer.fit(
-        epochs=training_options["n_epochs"], plot_learning=True
+        epochs=training_options["n_epochs"], plot_learning_history=True
     )
     logger.info(" Training finished!")
 
     # Save the trained model parameters
     trainer.save_model()
 
-    save_train_history(model_dir, loss_type, metric_type, loss_train, loss_validation, metric_validation)
+    save_train_history(
+        model_dir,
+        loss_type,
+        metric_type,
+        loss_train,
+        loss_validation,
+        metric_validation,
+    )
 
 
 def load_normalizer_params(model_name):
@@ -443,19 +355,17 @@ def initialize_weights(model, training_options):
             os.getcwd(), "trained_models", training_options["transfer_from"]
         )
         koopman_dict = torch.load(
-            os.path.join(
-                pretrained_model_dir, "trained_model", "TorchTrained_Koopman.pt"
-            ),
+            os.path.join(pretrained_model_dir, "trained_model", "koopman.pt"),
             map_location=torch.device("cpu"),
         )
         model.koopman.load_state_dict(koopman_dict["state_dict"])
 
         ## auto encoder model weights
         encoder_file_path = os.path.join(
-            pretrained_model_dir, "trained_model", "TorchTrained_Encoder.pt"
+            pretrained_model_dir, "trained_model", "encoder.pt"
         )
         decoder_file_path = os.path.join(
-            pretrained_model_dir, "trained_model", "TorchTrained_Decoder.pt"
+            pretrained_model_dir, "trained_model", "decoder.pt"
         )
         if (
             os.path.exists(encoder_file_path)
@@ -480,7 +390,7 @@ def initialize_weights(model, training_options):
 
         ## states aux model weights
         file_path = os.path.join(
-            pretrained_model_dir, "trained_model", "TorchTrained_states_auxiliary.pt"
+            pretrained_model_dir, "trained_model", "states_auxiliary.pt"
         )
         if os.path.exists(file_path) and training_options["transfer_states_aux"]:
             states_auxiliary_dict = torch.load(
@@ -497,7 +407,7 @@ def initialize_weights(model, training_options):
 
         ## check for pretrained inputs aux model weights
         file_path = os.path.join(
-            pretrained_model_dir, "trained_model", "TorchTrained_Inputs_auxiliary.pt"
+            pretrained_model_dir, "trained_model", "inputs_auxiliary.pt"
         )
         if os.path.exists(file_path) and training_options["transfer_input_aux"]:
             inputs_auxiliary_dict = torch.load(
@@ -529,9 +439,13 @@ def save_model_info(
     info = {
         "encoder_params": model_parameters["encoder_parameters"].copy(),
         "decoder_params": model_parameters["decoder_parameters"].copy(),
-        "states_auxiliary_params": model_parameters["states_auxiliary_parameters"].copy(),
+        "states_auxiliary_params": model_parameters[
+            "states_auxiliary_parameters"
+        ].copy(),
         "koopman_params": model_parameters["koopman_parameters"].copy(),
-        "inputs_auxiliary_params": model_parameters["inputs_auxiliary_parameters"].copy(),
+        "inputs_auxiliary_params": model_parameters[
+            "inputs_auxiliary_parameters"
+        ].copy(),
         "normalizer_params": normalizer_params.copy(),
         "training_options": training_options.copy(),
         "dataset_options": dataset_options.copy(),
@@ -541,21 +455,24 @@ def save_model_info(
         json.dump(info, fp)
 
 
-def save_train_history(model_dir, loss_type, metric_type, loss_train, loss_validation, metric_validation):
-        # Plot and save train history figures and CSV
-        train_history = pd.DataFrame(
-            {
-                "epoch": np.arange(1, training_options["n_epochs"] + 1),
-                "train_" + loss_type: loss_train,
-                "val_" + loss_type: loss_validation,
-                "val_" + metric_type + "_recon": metric_validation[:, 0],
-                "val_" + metric_type + "_pred": metric_validation[:, 1],
-                "val_" + metric_type + "_lin": metric_validation[:, 2],
-            }
-        )
-        train_history.to_csv(
-            os.path.join(model_dir, "Train_Results.csv"), sep=",", index=False
-        )
+def save_train_history(
+    model_dir, loss_type, metric_type, loss_train, loss_validation, metric_validation
+):
+    # Plot and save train history figures and CSV
+    train_history = pd.DataFrame(
+        {
+            "epoch": np.arange(1, training_options["n_epochs"] + 1),
+            "train_" + loss_type: loss_train,
+            "val_" + loss_type: loss_validation,
+            "val_" + metric_type + "_recon": metric_validation[:, 0],
+            "val_" + metric_type + "_pred": metric_validation[:, 1],
+            "val_" + metric_type + "_lin": metric_validation[:, 2],
+        }
+    )
+    train_history.to_csv(
+        os.path.join(model_dir, "training_history.csv"), sep=",", index=False
+    )
+
 
 if __name__ == "__main__":
     main()
