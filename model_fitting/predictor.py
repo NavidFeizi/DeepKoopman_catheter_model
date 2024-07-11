@@ -3,8 +3,8 @@ import torch
 from model_fitting.models import (
     MLP,
     DoubleMLP,
-    States_Auxilary,
-    Input_Auxilary,
+    States_Auxiliary,
+    Input_Auxiliary,
     LinearKoopman,
     LinearKoopmanWithInput,
     TrainableKoopmanDynamics,
@@ -184,7 +184,7 @@ class Predictor:
             return model.cpu()
 
     def load_states_auxilary(self, model_dict):
-        model = States_Auxilary(
+        model = States_Auxiliary(
             num_complexeigens_pairs=model_dict["num_complexeigens_pairs"],
             num_realeigens=model_dict["num_realeigens"],
             hidden_sizes=model_dict["hidden_sizes"],
@@ -208,7 +208,7 @@ class Predictor:
             return model.cpu()
 
     def load_inputs_auxilary(self, model_dict):
-        model = Input_Auxilary(
+        model = Input_Auxiliary(
             input_size=model_dict["lifted_state_size"],
             hidden_sizes=model_dict["hidden_sizes"],
             output_shape=model_dict["output_shape"],

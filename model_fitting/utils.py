@@ -1,7 +1,6 @@
 import os, sys, ast
 import numpy as np
 
-print(os.getcwd())
 sys.path.append(os.getcwd())
 
 import torch

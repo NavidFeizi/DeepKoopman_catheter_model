@@ -54,12 +54,12 @@ class MLP(nn.Module):
             self.act = activation
 
         if input_normalizer_params is not None:
-            self.x_min = torch.tensor(input_normalizer_params["params_x"]["min"], dtype=torch.float32).to(device)
-            self.x_max = torch.tensor(input_normalizer_params["params_x"]["max"], dtype=torch.float32).to(device)
+            self.x_min = torch.tensor(input_normalizer_params["params_x"]["min"], dtype=torch.float32)
+            self.x_max = torch.tensor(input_normalizer_params["params_x"]["max"], dtype=torch.float32)
         
         if output_normalizer_params is not None:
-            self.y_min = torch.tensor(output_normalizer_params["params_y"]["min"], dtype=torch.float32).to(device)
-            self.y_max = torch.tensor(output_normalizer_params["params_y"]["max"], dtype=torch.float32).to(device)
+            self.y_min = torch.tensor(output_normalizer_params["params_y"]["min"], dtype=torch.float32)
+            self.y_max = torch.tensor(output_normalizer_params["params_y"]["max"], dtype=torch.float32)
 
     def forward(self, x):
         # normalize the input if necessary
@@ -127,12 +127,12 @@ class DoubleMLP(nn.Module):
             self.act = activation
 
         if input_normalizer_params is not None:
-            self.x_min = torch.tensor(input_normalizer_params["params_x"]["min"], dtype=torch.float32).to(device)
-            self.x_max = torch.tensor(input_normalizer_params["params_x"]["max"], dtype=torch.float32).to(device)
+            self.x_min = torch.tensor(input_normalizer_params["params_x"]["min"], dtype=torch.float32)
+            self.x_max = torch.tensor(input_normalizer_params["params_x"]["max"], dtype=torch.float32)
         
         if output_normalizer_params is not None:
-            self.y_min = torch.tensor(output_normalizer_params["params_y"]["min"], dtype=torch.float32).to(device)
-            self.y_max = torch.tensor(output_normalizer_params["params_y"]["max"], dtype=torch.float32).to(device)
+            self.y_min = torch.tensor(output_normalizer_params["params_y"]["min"], dtype=torch.float32)
+            self.y_max = torch.tensor(output_normalizer_params["params_y"]["max"], dtype=torch.float32)
 
     def forward(self, x):
         # normalize the input if necessary
@@ -214,18 +214,18 @@ class CombinedDeepKoopman(nn.Module):
         self.koopman.requires_grad_(status)
         self.decoder.requires_grad_(status)
 
-# --- An auxilary network for predicting Eigen values of the Koopman operator ---#
-class States_Auxilary(nn.Module):
+# --- An auxiliary network for predicting Eigen values of the Koopman operator ---#
+class States_Auxiliary(nn.Module):
     def __init__(self, num_complexeigens_pairs, num_realeigens, hidden_sizes, activation=None, device=None):
         super().__init__()
         self.num_complexeigens_pairs = num_complexeigens_pairs
         self.num_realeigens = num_realeigens
         self.net = nn.ModuleList()
         for i in range(num_complexeigens_pairs):
-            self.net.append(MLP(input_size=1, hidden_sizes=hidden_sizes, output_size=2, activation=activation, device=device))
+            self.net.append(MLP(input_size=1, hidden_sizes=hidden_sizes, output_size=2, activation=activation))
 
         for i in range(num_realeigens):
-            self.net.append(MLP(input_size=1, hidden_sizes=hidden_sizes, output_size=1, activation=activation, device=device))
+            self.net.append(MLP(input_size=1, hidden_sizes=hidden_sizes, output_size=1, activation=activation))
 
     def forward(self, y):
         Lambdas = []
@@ -383,24 +383,24 @@ class TrainableKoopmanDynamics(nn.Module):
 
 # --- Full model including encoder, space varying Koopman operator, and decoder ---#
 class CombinedKoopman_withAux_withoutInput(nn.Module):
-    def __init__(self, encoder, auxilary, koopman, decoder):
+    def __init__(self, encoder, auxiliary, koopman, decoder):
         super().__init__()
         self.encoder = encoder
-        self.states_auxilary = auxilary
+        self.states_auxiliary = auxiliary
         self.koopman = koopman
         self.decoder = decoder
 
     def forward(self, x):
         y = self.encoder(x)
-        Lambda = self.states_auxilary(y)
+        Lambda = self.states_auxiliary(y)
         y_plus = self.koopman(y, Lambda)
         x_plus = self.decoder(y_plus)
         return y, y_plus, x_plus
     
     def requires_grad_(self, status):
         self.encoder.requires_grad_(status)
-        for i in range(len(self.states_auxilary.net)):
-            self.states_auxilary.net[i].requires_grad_(status)
+        for i in range(len(self.states_auxiliary.net)):
+            self.states_auxiliary.net[i].requires_grad_(status)
         self.decoder.requires_grad_(status)
 
     def Kmat(self, y, omega):
@@ -428,8 +428,8 @@ class CombinedKoopman_withAux_withoutInput(nn.Module):
         y_plus = y_plus.view(y.shape)
         return y_plus
 
-# --- An auxilary network for predicting B matrix for the input term ---#    
-class Input_Auxilary(nn.Module):
+# --- An auxiliary network for predicting B matrix for the input term ---#    
+class Input_Auxiliary(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_shape, activation=None, device=None):
         super().__init__()
         self.input_size = input_size
@@ -440,8 +440,7 @@ class Input_Auxilary(nn.Module):
             input_size=input_size,
             hidden_sizes=hidden_sizes,
             output_size=output_shape[0]*output_shape[1],
-            activation=activation,
-            device=device,
+            activation=activation
         )
 
     def forward(self, y):
@@ -452,20 +451,20 @@ class Input_Auxilary(nn.Module):
 # --- Full model including encoder, space varying Koopman operator, and decoder, and bilinear term for input 
 #     based on control affine model on Eurika Kaiser 2021 paper ---#
 class CombinedKoopman_withAux_withInput(nn.Module):
-    def __init__(self, encoder, states_auxilary, koopman, decoder, inputs_auxilary):
+    def __init__(self, encoder, states_auxiliary, koopman, decoder, inputs_auxiliary):
         super().__init__()
         self.encoder = encoder
-        self.states_auxilary = states_auxilary
+        self.states_auxiliary = states_auxiliary
         self.koopman = koopman
         self.decoder = decoder
-        self.inputs_auxilary = inputs_auxilary
+        self.inputs_auxiliary = inputs_auxiliary
 
     def forward(self, x):
         y = self.encoder(x)
-        Lambda = self.states_auxilary(y)
+        Lambda = self.states_auxiliary(y)
         y_plus = self.koopman(y, Lambda)
         x_plus = self.decoder(y_plus)
-        B_vec = self.inputs_auxilary(y)
+        B_vec = self.inputs_auxiliary(y)
 
         # Placeholder for the gradient
         grad_encoder = torch.zeros((y.shape[1], x.shape[1]), dtype=torch.float32)
@@ -482,10 +481,10 @@ class CombinedKoopman_withAux_withInput(nn.Module):
     
     def requires_grad_(self, status):
         self.encoder.requires_grad_(status)
-        for i in range(len(self.states_auxilary.net)):
-            self.states_auxilary.net[i].requires_grad_(status)
+        for i in range(len(self.states_auxiliary.net)):
+            self.states_auxiliary.net[i].requires_grad_(status)
         self.decoder.requires_grad_(status)
-        self.inputs_auxilary.requires_grad_(status)
+        self.inputs_auxiliary.requires_grad_(status)
 
     def Kmat(self, y, omega):
         w = omega[:,0]

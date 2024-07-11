@@ -1,7 +1,8 @@
 import os, copy, csv, torch
 import numpy as np
 import matplotlib.pyplot as plt
-from torchsummary import summary
+# from torchsummary import summary
+from torchinfo import summary
 
 plt.ion()
 
@@ -96,11 +97,11 @@ class Trainer:
         path = os.path.join(save_dir, "TorchTrained_Decoder.pt")
         torch.save(model_dict, path)
 
-        ### save auxilary separately, if exists
-        if hasattr(self._model, "states_auxilary"):
-            model_dict = copy.copy(self._model_parameters["states_auxilary_parameters"])
-            model_dict["state_dict"] = self._model.states_auxilary.state_dict()
-            path = os.path.join(save_dir, "TorchTrained_States_Auxilary.pt")
+        ### save auxiliary separately, if exists
+        if hasattr(self._model, "states_auxiliary"):
+            model_dict = copy.copy(self._model_parameters["states_auxiliary_parameters"])
+            model_dict["state_dict"] = self._model.states_auxiliary.state_dict()
+            path = os.path.join(save_dir, "TorchTrained_States_auxiliary.pt")
             torch.save(model_dict, path)
 
         ### save Koopman operator separately
@@ -109,11 +110,11 @@ class Trainer:
         path = os.path.join(save_dir, "TorchTrained_Koopman.pt")
         torch.save(model_dict, path)
 
-        ### save inputs_auxilary separately, if exists
-        if hasattr(self._model, "inputs_auxilary"):
-            model_dict = copy.copy(self._model_parameters["inputs_auxilary_parameters"])
-            model_dict["state_dict"] = self._model.inputs_auxilary.state_dict()
-            path = os.path.join(save_dir, "TorchTrained_Inputs_Auxilary.pt")
+        ### save inputs_auxiliary separately, if exists
+        if hasattr(self._model, "inputs_auxiliary"):
+            model_dict = copy.copy(self._model_parameters["inputs_auxiliary_parameters"])
+            model_dict["state_dict"] = self._model.inputs_auxiliary.state_dict()
+            path = os.path.join(save_dir, "TorchTrained_Inputs_auxiliary.pt")
             torch.save(model_dict, path)
 
         # A_matrix = self._model.koopman.state_dict()['A.weight'].cpu().numpy()
@@ -130,6 +131,17 @@ class Trainer:
         #         writer.writerow(row)
 
         # print('Trained model saved in "', self._model_parameters["name"], '"')
+
+    def save_model_structure(self, model, file_path):
+        """
+        Save the model structure to a file.
+
+        Parameters:
+        - model: The PyTorch model.
+        - file_path: Path to the file where the structure will be saved.
+        """
+        with open(file_path, 'w') as f:
+            f.write(str(model))
 
     def save_onnx(self, fn):
         m = self._model.cpu()
@@ -269,9 +281,9 @@ class Trainer:
         y, encoder_jacobian = self.encode(x=x, requires_grad=True)
 
         for j in range(self._sequence_length - 1):
-                Lambdas = self._model.states_auxilary(y)
+                Lambdas = self._model.states_auxiliary(y)
                 y, G, A = self._model.koopman(y, Lambdas)  ## unforced part
-                B = self._model.inputs_auxilary(y)
+                B = self._model.inputs_auxiliary(y)
 
                 #### this is for direcrtr use of estimated B as B_Phi - may need to be cahnges according to the structure
                 B_phi = B
@@ -352,12 +364,12 @@ class Trainer:
 
         self._model.encoder.requires_grad_(self._training_parameters["train_encoder"])
         self._model.decoder.requires_grad_(self._training_parameters["train_decoder"])
-        self._model.states_auxilary.requires_grad_(
-            self._training_parameters["train_states_auxilary"]
+        self._model.states_auxiliary.requires_grad_(
+            self._training_parameters["train_states_auxiliary"]
         )
-        # self._model.koopman.requires_grad_(self._training_parameters["train_states_auxilary"])
-        self._model.inputs_auxilary.requires_grad_(
-            self._training_parameters["train_inputs_auxilary"]
+        # self._model.koopman.requires_grad_(self._training_parameters["train_states_auxiliary"])
+        self._model.inputs_auxiliary.requires_grad_(
+            self._training_parameters["train_inputs_auxiliary"]
         )
 
         counter = 0
@@ -464,18 +476,19 @@ class Trainer:
 
         self._model.encoder.requires_grad_(self._training_parameters["train_encoder"])
         self._model.decoder.requires_grad_(self._training_parameters["train_decoder"])
-        self._model.states_auxilary.requires_grad_(
-            self._training_parameters["train_states_auxilary"]
+        self._model.states_auxiliary.requires_grad_(
+            self._training_parameters["train_states_auxiliary"]
         )
-        # self._model.koopman.requires_grad_(self._training_parameters["train_states_auxilary"])
-        self._model.inputs_auxilary.requires_grad_(
-            self._training_parameters["train_inputs_auxilary"]
+        # self._model.koopman.requires_grad_(self._training_parameters["train_states_auxiliary"])
+        self._model.inputs_auxiliary.requires_grad_(
+            self._training_parameters["train_inputs_auxiliary"]
         )
 
         ## print model info
         print(f"Train dataset has {len(self._train_dl)} batches.")
-        print(self._model)
+        # print(self._model)
         # summary(self._model, (1, 2))
+        self.save_model_structure(self._model, os.path.join(self._save_dir, "model_summary.txt"))
         print(
             f"Model has {sum(p.numel() for p in self._model.parameters() if p.requires_grad)} parameters."
         )
@@ -543,6 +556,8 @@ class Trainer:
             counter += 1
             self._epoch += 1
         return (train_losses[1:], val_losses[1:], val_metrices[1:, :])
+
+    
 
     def plot_training_progress(
         self,
@@ -626,3 +641,5 @@ class Trainer:
         plt.draw()
         plt.pause(0.1)
         plt.savefig(os.path.join(self._save_dir, "Training_Loss.pdf"), format="pdf")
+
+    

@@ -19,12 +19,12 @@ print("Running on", device)
 
 """ Adjust Parameters """
 ##################################################################################
-model_name = "catheter_1T_unforced_3.1"
-simulation_time = 0.900
+model_name = "catheter_1T_forced_3.1.2"
+simulation_time = 0.800
 sample_time_override = 2e-3
 # plot_index_list = [2, 21, 51, 61]
-# plot_index_list = [57]
-plot_index_list = [21, 31, 41, 51, 73]
+plot_index_list = [5, 10, 15, 20, 25]
+# plot_index_list = [21, 31, 41, 51, 73]
 # plot_index_list = [5, 24, 54, 64, 74]
 
 states_name = ["$x$", "$\dot{x}$", "$z$", "$\dot{z}$"]  # Example state names
@@ -153,6 +153,14 @@ def main():
             model_info["inputs_auxilary_params"]["system_input_size"],
         )
     )
+    A = np.empty(
+        (
+            num_traj,
+            num_pred_steps,
+            model_info["encoder_params"]["lifted_state_size"],
+            model_info["encoder_params"]["lifted_state_size"],
+        )
+    )
     B = np.empty(
         (
             num_traj,
@@ -203,6 +211,7 @@ def main():
             []
         )  ## predicted value of x_plus from decoding the iterated Koopman model
         Lambdas_list = []
+        A_list = []
         B_list = []
         U_list = []
         Yobs_list = []
@@ -235,7 +244,8 @@ def main():
             Y_adv = pred.koopman_step(G, H, Y0, u[:, j, :])
             Xp_pred_list.append(pred.decode(Y_adv)[0])
             Lambdas_list.append(Lambdas_)
-            B_list.append(B_)
+            B_list.append(H)
+            A_list.append(G)
             U_list.append(u[:, j, :])
             Yp_pred_list.append(Y_adv)
             Y0 = Y_adv
@@ -254,6 +264,7 @@ def main():
         Lambdas[i, :, :] = torch.stack(Lambdas_list, dim=1).detach().numpy()[0, :, :]
         U[i, :, :] = torch.stack(U_list, dim=1).detach().numpy()[0, :, :]
         B[i, :, :] = torch.stack(B_list, dim=1).detach().numpy()[0, :, :, :]
+        A[i, :, :] = torch.stack(A_list, dim=1).detach().numpy()[0, :, :, :]
         # Yobs[i, :, :] = torch.stack(Yobs_list, dim=1).detach().numpy()[0, :, :]
         # Xobs[i, :, :] = torch.stack(Xobs_list, dim=1).detach().numpy()[0, :, :]
 
@@ -268,6 +279,17 @@ def main():
     errors_Xp_pred = np.abs(Xp_pred - Xp)
     errors_Yp_pred = np.abs(Yp_pred - Yp)
 
+    
+    #### Plot - Errors """
+    plot_errors(Xp, errors_Xp_pred, errors_Xrecon, states_name, model_dir, save=True)
+    #### Plot - Eigen functions """
+    plot_eigen_functions(Yp, Lambdas, model_dir, save=True)
+    #### Plot - B Matrix """
+    plot_A_Matrix(Yp, A, model_dir, save=True)
+    #### Plot - B Matrix """
+    plot_B_Matrix(Yp, B, model_dir, save=True)
+
+    plot_encoder_map(Yp, Xp, model_dir, save=True)
     #### Plot - states phase and time domain """
     plot_states(
         time_pred,
@@ -292,14 +314,6 @@ def main():
         save=True,
         Yobs=None,
     )
-    #### Plot - Errors """
-    plot_errors(Xp, errors_Xp_pred, errors_Xrecon, states_name, model_dir, save=True)
-    #### Plot - Eigen functions """
-    plot_eigen_functions(Yp, Lambdas, model_dir, save=True)
-    #### Plot - B Matrix """
-    plot_B_Matrix(Yp, B, model_dir, save=True)
-
-    plot_encoder_map(Yp, Xp, model_dir, save=True)
 
 
 def plot_states(
@@ -500,7 +514,7 @@ def plot_states(
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Prediction_States.pdf"), format="pdf")
-        plt.savefig(os.path.join(save_dir, "PNG/Prediction_States.png"), format="png")
+        plt.savefig(os.path.join(save_dir, "PNG/Prediction_States.png"), format="png", dpi=300)
 
     ## 3D figure
     # fig = plt.figure(figsize=(12, 7.5))
@@ -685,7 +699,7 @@ def plot_lifted_states(
             os.path.join(save_dir, "Prediction_Lifted_States.pdf"), format="pdf"
         )
         plt.savefig(
-            os.path.join(save_dir, "PNG/Prediction_Lifted_States.png"), format="png"
+            os.path.join(save_dir, "PNG/Prediction_Lifted_States.png"), format="png", dpi=600
         )
 
 
@@ -894,13 +908,13 @@ def plot_eigen_functions(Yp, Lambdas, save_dir, save=False):
     axs[0].set_xlabel(lifted_states_name[0])
     axs[0].set_ylabel(lifted_states_name[1])
     axs[0].minorticks_on()
-    axs[0].set_aspect("equal", adjustable="box")
+    # axs[0].set_aspect("equal", adjustable="box")
 
     axs[1].set_title("$\omega_1$")
     axs[1].set_xlabel(lifted_states_name[0])
     axs[1].set_ylabel(lifted_states_name[1])
     axs[1].minorticks_on()
-    axs[1].set_aspect("equal", adjustable="box")
+    # axs[1].set_aspect("equal", adjustable="box")
 
     # axs[0, 1].set_title("$\mu_2$")
     # axs[0, 1].set_xlabel(lifted_states_name[2])
@@ -921,7 +935,94 @@ def plot_eigen_functions(Yp, Lambdas, save_dir, save=False):
         plt.savefig(
             os.path.join(save_dir, "Prediction_Eigen function.pdf"), format="pdf"
         )
-        plt.savefig(os.path.join(save_dir, "PNG/Prediction_Eigen.png"), format="png")
+        plt.savefig(os.path.join(save_dir, "PNG/Prediction_Eigen.png"), format="png", dpi=300)
+
+
+def plot_A_Matrix(Yp, A, save_dir, save=False):
+    print("Plotting G Matrix ...")
+
+    lifted_states_name = [
+        "$y_1$",
+        "$y_2$",
+        "$y_3$",
+        "$y_4$",
+        "$y_5$",
+        "$y_6$",
+    ]  # Example state names
+
+    fig, axs = plt.subplots(2, 2, figsize=(7, 8))
+
+    sc1 = axs[0, 0].scatter(
+        Yp[:, :, 0].flatten(),
+        Yp[:, :, 1].flatten(),
+        c=A[:, :, 0, 0].flatten(),
+        cmap="viridis",
+        s=2,
+    )
+    sc2 = axs[0, 1].scatter(
+        Yp[:, :, 0].flatten(),
+        Yp[:, :, 1].flatten(),
+        c=A[:, :, 0, 1].flatten(),
+        cmap="viridis",
+        s=2,
+    )
+    sc3 = axs[1, 0].scatter(
+        Yp[:, :, 0].flatten(),
+        Yp[:, :, 1].flatten(),
+        c=A[:, :, 1, 0].flatten(),
+        cmap="viridis",
+        s=2,
+    )
+    sc4 = axs[1, 1].scatter(
+        Yp[:, :, 0].flatten(),
+        Yp[:, :, 1].flatten(),
+        c=A[:, :, 1, 1].flatten(),
+        cmap="viridis",
+        s=2,
+    )
+
+    # Set the grid to appear behind plot elements
+    for ax in axs.flat:
+        ax.set_axisbelow(True)
+        ax.grid(which="both", color="lightgray", linestyle="--", linewidth=0.5)
+
+    # Add color bars for each scatter plot
+    cbar_kwargs = {"fraction": 0.046, "pad": 0.04}  # Adjust these values as needed
+    fig.colorbar(sc1, ax=axs[0, 0], **cbar_kwargs)
+    fig.colorbar(sc2, ax=axs[0, 1], **cbar_kwargs)
+    fig.colorbar(sc3, ax=axs[1, 0], **cbar_kwargs)
+    fig.colorbar(sc4, ax=axs[1, 1], **cbar_kwargs)
+
+    axs[0, 0].set_title("$G_{1,1}$")
+    axs[0, 0].set_xlabel(lifted_states_name[0])
+    axs[0, 0].set_ylabel(lifted_states_name[1])
+    axs[0, 0].minorticks_on()
+    # axs[0, 0].set_aspect("equal", adjustable="box")
+
+    axs[0, 1].set_title("$G_{1,2}$")
+    axs[0, 1].set_xlabel(lifted_states_name[0])
+    axs[0, 1].set_ylabel(lifted_states_name[1])
+    axs[0, 1].minorticks_on()
+    # axs[0, 1].set_aspect("equal", adjustable="box")
+
+    axs[1, 0].set_title("$G_{2,1}$")
+    axs[1, 0].set_xlabel(lifted_states_name[0])
+    axs[1, 0].set_ylabel(lifted_states_name[1])
+    axs[1, 0].minorticks_on()
+    # axs[1, 0].set_aspect("equal", adjustable="box")
+
+    axs[1, 1].set_title("$G_{2,2}$")
+    axs[1, 1].set_xlabel(lifted_states_name[0])
+    axs[1, 1].set_ylabel(lifted_states_name[1])
+    axs[1, 1].minorticks_on()
+    # axs[1, 1].set_aspect("equal", adjustable="box")
+
+    plt.tight_layout()  # Adjust layout to make room for the colorbar
+    plt.draw()
+    plt.pause(0.1)
+    if save:
+        plt.savefig(os.path.join(save_dir, "Prediction_G_Matrix.pdf"), format="pdf")
+        plt.savefig(os.path.join(save_dir, "PNG/Prediction_G_Matrix.png"), format="png", dpi=300)
 
 
 def plot_B_Matrix(Yp, B, save_dir, save=False):
@@ -978,17 +1079,17 @@ def plot_B_Matrix(Yp, B, save_dir, save=False):
     fig.colorbar(sc2, ax=axs[1], **cbar_kwargs)
     # fig.colorbar(sc3, ax=axs[0, 1], **cbar_kwargs)
     # fig.colorbar(sc4, ax=axs[1, 1], **cbar_kwarg
-    axs[0].set_title("$B_{1,1}$")
+    axs[0].set_title("$H_{1,1}$")
     axs[0].set_xlabel(lifted_states_name[0])
     axs[0].set_ylabel(lifted_states_name[1])
     axs[0].minorticks_on()
-    axs[0].set_aspect("equal", adjustable="box")
+    # axs[0].set_aspect("equal", adjustable="box")
 
-    axs[1].set_title("$B_{2,1}$")
+    axs[1].set_title("$H_{2,1}$")
     axs[1].set_xlabel(lifted_states_name[0])
     axs[1].set_ylabel(lifted_states_name[1])
     axs[1].minorticks_on()
-    axs[1].set_aspect("equal", adjustable="box")
+    # axs[1].set_aspect("equal", adjustable="box")
 
     # axs[0, 1].set_title("$B_{3,1}$")
     # axs[0, 1].set_xlabel(lifted_states_name[0])
@@ -1006,8 +1107,8 @@ def plot_B_Matrix(Yp, B, save_dir, save=False):
     plt.draw()
     plt.pause(0.1)
     if save:
-        plt.savefig(os.path.join(save_dir, "Prediction_B_Matrix.pdf"), format="pdf")
-        plt.savefig(os.path.join(save_dir, "PNG/Prediction_B_Matrix.png"), format="png")
+        plt.savefig(os.path.join(save_dir, "Prediction_H_Matrix.pdf"), format="pdf")
+        plt.savefig(os.path.join(save_dir, "PNG/Prediction_H_Matrix.png"), format="png", dpi=300)
 
 
 def plot_encoder_map(Yp, Xp, save_dir, save=False):
@@ -1069,32 +1170,32 @@ def plot_encoder_map(Yp, Xp, save_dir, save=False):
     axs[0, 0].set_xlabel(lifted_states_name[0])
     axs[0, 0].set_ylabel(lifted_states_name[1])
     axs[0, 0].minorticks_on()
-    axs[0, 0].set_aspect("equal", adjustable="box")
+    # axs[0, 0].set_aspect("equal", adjustable="box")
 
     axs[1, 0].set_title("$X_2$")
     axs[1, 0].set_xlabel(lifted_states_name[0])
     axs[1, 0].set_ylabel(lifted_states_name[1])
     axs[1, 0].minorticks_on()
-    axs[1, 0].set_aspect("equal", adjustable="box")
+    # axs[1, 0].set_aspect("equal", adjustable="box")
 
     axs[0, 1].set_title("$X_3$")
     axs[0, 1].set_xlabel(lifted_states_name[0])
     axs[0, 1].set_ylabel(lifted_states_name[1])
     axs[0, 1].minorticks_on()
-    axs[0, 1].set_aspect("equal", adjustable="box")
+    # axs[0, 1].set_aspect("equal", adjustable="box")
 
     axs[1, 1].set_title("$X_4$")
     axs[1, 1].set_xlabel(lifted_states_name[0])
     axs[1, 1].set_ylabel(lifted_states_name[1])
     axs[1, 1].minorticks_on()
-    axs[1, 1].set_aspect("equal", adjustable="box")
+    # axs[1, 1].set_aspect("equal", adjustable="box")
 
     plt.tight_layout()  # Adjust layout to make room for the colorbar
     plt.draw()
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Decoder_map.pdf"), format="pdf")
-        plt.savefig(os.path.join(save_dir, "PNG/Decoder_map.png"), format="png")
+        plt.savefig(os.path.join(save_dir, "PNG/Decoder_map.png"), format="png", dpi=300)
 
 
 if __name__ == "__main__":
