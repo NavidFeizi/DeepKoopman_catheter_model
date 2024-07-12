@@ -163,7 +163,10 @@ class Trainer:
             logger.error(f" Error saving model summary to {file_path}: {e}")
 
     def encode(
-        self, x: torch.Tensor, requires_jacobian: bool = False
+        self,
+        x: torch.Tensor,
+        requires_grad: bool = False,
+        return_jacobian: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Transform a state in state space to the lifted space (X(i) -> Y(i)) and calculate the Jacobian of the encoder.
@@ -178,12 +181,12 @@ class Trainer:
             - The Jacobian of the encoder (if requires_grad is True), otherwise None.
         """
         logger = logging.getLogger(f"{__name__}.encode")
-        if requires_jacobian:
+        if requires_grad or return_jacobian:
             x.requires_grad_()
 
         y = self._model.encoder(x)
 
-        if requires_jacobian:
+        if return_jacobian:
             output_dim = y.shape[1]
             batch_size, input_dim = x.shape
             encoder_jacobian = torch.zeros(
@@ -206,12 +209,17 @@ class Trainer:
             encoder_jacobian *= self._norm_factor
         else:
             encoder_jacobian = None
+
+        if not requires_grad and not return_jacobian:
             y = y.detach()
 
         return y, encoder_jacobian
 
     def decode(
-        self, y: torch.Tensor, requires_jacobian: bool = False
+        self,
+        y: torch.Tensor,
+        requires_grad: bool = False,
+        return_jacobian: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Transform a state in lifted space to state space (Y(i) -> X(i)) and calculate the Jacobian of the decoder.
@@ -227,12 +235,12 @@ class Trainer:
         """
         logger = logging.getLogger(f"{__name__}.decode")
 
-        if requires_jacobian:
+        if requires_grad or return_jacobian:
             y.requires_grad_()
 
         x = self._model.decoder(y)
 
-        if requires_jacobian:
+        if return_jacobian:
             output_dim = x.shape[1]
             batch_size, input_dim = y.shape
             decoder_jacobian = torch.zeros(
@@ -252,11 +260,11 @@ class Trainer:
                 )[0]
                 decoder_jacobian[:, i, :] = grads
             # The effect of normalization is not considered in the autograd
-            decoder_jacobian *= (1 / self._norm_factor).unsqueeze(
-                1
-            )  # The effect of normalization is not considered in the autograd
+            decoder_jacobian *= (1 / self._norm_factor).unsqueeze(1)
         else:
             decoder_jacobian = None
+
+        if not requires_grad and not return_jacobian:
             x = x.detach()
 
         return x, decoder_jacobian
@@ -295,7 +303,8 @@ class Trainer:
 
         x = X[:, 0, :]
         x.requires_grad_(self._training_parameters["train_encoder"])
-        y, encoder_jacobian = self.encode(x=x, requires_jacobian=False)
+        # y, encoder_jacobian = self.encode(x=x, requires_grad=True)
+        y = self._model.encoder(x)
 
         # Loop over the sequence steps
         for j in range(self._sequence_length - 1):
@@ -306,9 +315,8 @@ class Trainer:
             #### this is for direct use of estimated B as B_Phi - may need to be cahnges according to the structure
             B_phi = B
             # B_phi = torch.matmul(encoder_jacobian, B)
-            temp = torch.matmul(
-                torch.inverse(A), (G - torch.eye(y.shape[1], device=y.device))
-            )
+            identity_matrix = torch.eye(y.shape[1], device=y.device)
+            temp = torch.matmul(torch.inverse(A), (G - identity_matrix))
             H = torch.matmul(temp, B_phi)
 
             # control input part
@@ -468,9 +476,7 @@ class Trainer:
         for x, u, y in self._train_dl:
             # Transfer the batch to "cuda()" -> the gpu if a gpu is given
             if self._cuda:
-                x = x.cuda()
-                u = u.cuda()
-                y = y.cuda()
+                x, u, y = x.cuda(), u.cuda(), y.cuda()
 
             # Perform a training step
             loss_batch, metric_batch = self.train_step(x, u)

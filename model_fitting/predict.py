@@ -1,25 +1,26 @@
-import os, sys
-
+import os, sys, json, torch
 print(os.getcwd())
 sys.path.append(os.getcwd())
-
-import json
-import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d import Axes3D
-from model_fitting.predictor import Predictor
 from torch.utils.data import DataLoader, Dataset
 from model_fitting.utils import MLPDataset
+from model_fitting.predictor import Predictor
+
+import logging
+logging.basicConfig(level=logging.INFO)
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Running on", device)
-
+logger = logging.getLogger(__name__)
+logger.info(" Running on %s", device)
 
 """ Adjust Parameters """
 ##################################################################################
-model_name = "catheter_1T_forced_3.1.2"
+model_name = "catheter_1T_unforced_3.1"
 simulation_time = 0.800
 sample_time_override = 2e-3
 # plot_index_list = [2, 21, 51, 61]
@@ -150,7 +151,7 @@ def main():
         (
             num_traj,
             num_pred_steps,
-            model_info["inputs_auxilary_params"]["system_input_size"],
+            model_info["inputs_auxiliary_params"]["system_input_size"],
         )
     )
     A = np.empty(
@@ -166,7 +167,7 @@ def main():
             num_traj,
             num_pred_steps,
             model_info["encoder_params"]["lifted_state_size"],
-            model_info["inputs_auxilary_params"]["system_input_size"],
+            model_info["inputs_auxiliary_params"]["system_input_size"],
         )
     )
     Yobs = np.empty(
@@ -189,7 +190,6 @@ def main():
     pred = Predictor(
         model_dir,
         num_pred_steps=num_pred_steps,
-        seq_length=dataset_info["test_sequence_length"],
         normalizer_params=model_info["normalizer_params"],
         cuda=False,
         sample_time_override=sample_time_override,
@@ -201,15 +201,15 @@ def main():
     """ Predict """
     ####################################################################################
     print("Predicting...")
-    for i, (x, u, y) in enumerate(dataloader_test):
+    for i, (x, u, _) in enumerate(dataloader_test):
         # if i >= 20:
         #     break
         Xp_list = []  ## truth value of x_plus from advanced x
         Yp_list = []
         Yp_pred_list = []  ## predicted value of y_plus from iterating the Koopman model
-        Xp_pred_list = (
-            []
-        )  ## predicted value of x_plus from decoding the iterated Koopman model
+        ## predicted value of x_plus from decoding the iterated Koopman model
+        Xp_pred_list = []
+
         Lambdas_list = []
         A_list = []
         B_list = []
@@ -225,33 +225,32 @@ def main():
                 delimiter=",",
             )
 
-        y = torch.tensor([[x[:, 0, 0], x[:, 0, 2]]])
+        # y = torch.tensor([[x[:, 0, 0], x[:, 0, 2]]])
         # y = x[:, 0, :]
         u = u[:, 0::STF, :]  ## downsample u
 
-        ### predict trajectory at once
-        # Xp_pred_list, Yp_pred_list, Lambdas_list, B_list, U_list = (
-        #     pred.predict_trajectory(x0=x[:, 0, :], u=u, requires_grad=True)
-        # )
+        ## predict trajectory at once
+        Xp_pred_list, Yp_pred_list, Lambdas_list, A_list, B_list, U_list = (
+            pred.predict_trajectory(x0=x[:, 0, :], u=u, requires_grad=True)
+        )
 
-        ### predict trajectory in a loop
-        X0 = x[:, 0, :]
-        Y0, encoder_jacobian = pred.encode(x=X0, requires_grad=True)
-        # pred.load_script_model(X0)
+        # ### predict trajectory in a loop
+        # X0 = x[:, 0, :]
+        # y, encoder_jacobian = pred.encode(x=X0, requires_grad=True)
+        # # pred.load_script_model(X0)
 
-        for j in range(num_pred_steps):
-            G, H, B_, Lambdas_ = pred.get_ABL(Y0, encoder_jacobian)
-            Y_adv = pred.koopman_step(G, H, Y0, u[:, j, :])
-            Xp_pred_list.append(pred.decode(Y_adv)[0])
-            Lambdas_list.append(Lambdas_)
-            B_list.append(H)
-            A_list.append(G)
-            U_list.append(u[:, j, :])
-            Yp_pred_list.append(Y_adv)
-            Y0 = Y_adv
+        # for j in range(num_pred_steps):
+        #     G, H, A_, B_, Lambdas_ = pred.compute_model_matrices(y, None)
+        #     y = pred.compute_next_lifted_state(G, H, y, u[:, j, :])
+        #     Yp_pred_list.append(y)
+        #     Xp_pred_list.append(pred.decode(y)[0])
+        #     Lambdas_list.append(Lambdas_)
+        #     B_list.append(H)
+        #     A_list.append(G)
+        #     U_list.append(u[:, j, :])
 
         # Yp_list = pred.lift_a_trajectory(x=x)
-        Xrecon_list = pred.encode_and_decode_a_trajectory(x=x)
+        Xrecon_list = pred.reconstruct_trajectory(x=x)
         for j in range(num_pred_steps):
             Xp_list.append(x[:, ((j + 1) * STF), :])
             Yp_list.append(pred._model.encoder(x[:, ((j + 1) * STF), :]))
@@ -263,10 +262,9 @@ def main():
         Yp_pred[i, :, :] = torch.stack(Yp_pred_list, dim=1).detach().numpy()[0, :, :]
         Lambdas[i, :, :] = torch.stack(Lambdas_list, dim=1).detach().numpy()[0, :, :]
         U[i, :, :] = torch.stack(U_list, dim=1).detach().numpy()[0, :, :]
-        B[i, :, :] = torch.stack(B_list, dim=1).detach().numpy()[0, :, :, :]
         A[i, :, :] = torch.stack(A_list, dim=1).detach().numpy()[0, :, :, :]
-        # Yobs[i, :, :] = torch.stack(Yobs_list, dim=1).detach().numpy()[0, :, :]
-        # Xobs[i, :, :] = torch.stack(Xobs_list, dim=1).detach().numpy()[0, :, :]
+        B[i, :, :] = torch.stack(B_list, dim=1).detach().numpy()[0, :, :, :]
+        
 
     # Xp = inverse_normalize(Xp, model_info["normalizer_params"]["params_x"])
     # Xp_pred = inverse_normalize(Xp_pred, model_info["normalizer_params"]["params_x"])
@@ -279,15 +277,14 @@ def main():
     errors_Xp_pred = np.abs(Xp_pred - Xp)
     errors_Yp_pred = np.abs(Yp_pred - Yp)
 
-    
     #### Plot - Errors """
     plot_errors(Xp, errors_Xp_pred, errors_Xrecon, states_name, model_dir, save=True)
     #### Plot - Eigen functions """
     plot_eigen_functions(Yp, Lambdas, model_dir, save=True)
     #### Plot - B Matrix """
-    plot_A_Matrix(Yp, A, model_dir, save=True)
+    # plot_A_Matrix(Yp, A, model_dir, save=True)
     #### Plot - B Matrix """
-    plot_B_Matrix(Yp, B, model_dir, save=True)
+    # plot_B_Matrix(Yp, B, model_dir, save=True)
 
     plot_encoder_map(Yp, Xp, model_dir, save=True)
     #### Plot - states phase and time domain """
@@ -329,7 +326,7 @@ def plot_states(
     Xrecon=None,
 ):
     print("Plotting states...")
-    fig = plt.figure(figsize=(7, 5))
+    fig = plt.figure(figsize=(12, 8))
     gs = GridSpec(
         6,
         2,
@@ -359,7 +356,6 @@ def plot_states(
         counter = 0
         for j in range(0, len(states_name), 2):
             axs[counter].plot(
-
                 Xp[i, :, j],
                 Xp[i, :, j + 1],
                 c=color,
@@ -514,7 +510,9 @@ def plot_states(
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Prediction_States.pdf"), format="pdf")
-        plt.savefig(os.path.join(save_dir, "PNG/Prediction_States.png"), format="png", dpi=300)
+        plt.savefig(
+            os.path.join(save_dir, "PNG/Prediction_States.png"), format="png", dpi=300
+        )
 
     ## 3D figure
     # fig = plt.figure(figsize=(12, 7.5))
@@ -699,7 +697,9 @@ def plot_lifted_states(
             os.path.join(save_dir, "Prediction_Lifted_States.pdf"), format="pdf"
         )
         plt.savefig(
-            os.path.join(save_dir, "PNG/Prediction_Lifted_States.png"), format="png", dpi=600
+            os.path.join(save_dir, "PNG/Prediction_Lifted_States.png"),
+            format="png",
+            dpi=600,
         )
 
 
@@ -935,7 +935,9 @@ def plot_eigen_functions(Yp, Lambdas, save_dir, save=False):
         plt.savefig(
             os.path.join(save_dir, "Prediction_Eigen function.pdf"), format="pdf"
         )
-        plt.savefig(os.path.join(save_dir, "PNG/Prediction_Eigen.png"), format="png", dpi=300)
+        plt.savefig(
+            os.path.join(save_dir, "PNG/Prediction_Eigen.png"), format="png", dpi=300
+        )
 
 
 def plot_A_Matrix(Yp, A, save_dir, save=False):
@@ -1022,7 +1024,9 @@ def plot_A_Matrix(Yp, A, save_dir, save=False):
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Prediction_G_Matrix.pdf"), format="pdf")
-        plt.savefig(os.path.join(save_dir, "PNG/Prediction_G_Matrix.png"), format="png", dpi=300)
+        plt.savefig(
+            os.path.join(save_dir, "PNG/Prediction_G_Matrix.png"), format="png", dpi=300
+        )
 
 
 def plot_B_Matrix(Yp, B, save_dir, save=False):
@@ -1108,7 +1112,9 @@ def plot_B_Matrix(Yp, B, save_dir, save=False):
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Prediction_H_Matrix.pdf"), format="pdf")
-        plt.savefig(os.path.join(save_dir, "PNG/Prediction_H_Matrix.png"), format="png", dpi=300)
+        plt.savefig(
+            os.path.join(save_dir, "PNG/Prediction_H_Matrix.png"), format="png", dpi=300
+        )
 
 
 def plot_encoder_map(Yp, Xp, save_dir, save=False):
@@ -1195,7 +1201,9 @@ def plot_encoder_map(Yp, Xp, save_dir, save=False):
     plt.pause(0.1)
     if save:
         plt.savefig(os.path.join(save_dir, "Decoder_map.pdf"), format="pdf")
-        plt.savefig(os.path.join(save_dir, "PNG/Decoder_map.png"), format="png", dpi=300)
+        plt.savefig(
+            os.path.join(save_dir, "PNG/Decoder_map.png"), format="png", dpi=300
+        )
 
 
 if __name__ == "__main__":

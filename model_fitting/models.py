@@ -58,8 +58,8 @@ class MLP(nn.Module):
             self.x_max = torch.tensor(input_normalizer_params["params_x"]["max"], dtype=torch.float32)
         
         if output_normalizer_params is not None:
-            self.y_min = torch.tensor(output_normalizer_params["params_y"]["min"], dtype=torch.float32)
-            self.y_max = torch.tensor(output_normalizer_params["params_y"]["max"], dtype=torch.float32)
+            self.y_min = torch.tensor(output_normalizer_params["params_x"]["min"], dtype=torch.float32)
+            self.y_max = torch.tensor(output_normalizer_params["params_x"]["max"], dtype=torch.float32)
 
     def forward(self, x):
         # normalize the input if necessary

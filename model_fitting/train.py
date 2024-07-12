@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ExponentialLR
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -40,11 +39,21 @@ from model_fitting.models import (
     CombinedKoopman_withAux_withInput,
 )
 
-from config import (MODEL_DETAILS, dataset_options, training_options, koopman_params,
-                    encoder_params, decoder_params, states_auxiliary_params,
-                    inputs_auxiliary_params, DEVICE, model_dir)
+from config import (
+    MODEL_DETAILS,
+    dataset_options,
+    training_options,
+    koopman_params,
+    encoder_params,
+    decoder_params,
+    states_auxiliary_params,
+    inputs_auxiliary_params,
+    DEVICE,
+    model_dir,
+)
 
 logger.info(" Running on %s", DEVICE)
+
 
 def main():
     datasets_dir = os.path.join(
@@ -72,7 +81,7 @@ def main():
     normalizer_params = load_normalizer_params(pretrained_model_name)
 
     # Load Dataset
-    dataset_train, dataset_val, dataset_test = load_datasets(
+    normalizer_params, dataset_train, dataset_val, dataset_test = load_datasets(
         datasets_dir, dataset_options, normalizer_params
     )
     dataloader_train = DataLoader(
@@ -81,7 +90,7 @@ def main():
     dataloader_valid = DataLoader(
         dataset=dataset_val, batch_size=training_options["batch_size"], shuffle=False
     )
-    dataloader_test = DataLoader(dataset=dataset_test, shuffle=False)
+    # dataloader_test = DataLoader(dataset=dataset_test, shuffle=False)
 
     # Create the model structure
     model = create_model(
@@ -100,7 +109,7 @@ def main():
         alpha_1=training_options["lossfunc_weights"][0],
         alpha_2=training_options["lossfunc_weights"][1],
         alpha_reg=training_options["lossfunc_weights"][2],
-        weights_x=torch.tensor(([1,10,1,10])).to(DEVICE)
+        weights_x=torch.tensor(training_options["weights_x"]).to(DEVICE),
     )
     loss_type = "MSE"
     metric_function = DeepKoopmanExplicitMetric()
@@ -251,7 +260,7 @@ def load_datasets(datasets_dir, dataset_options, normalizer_params):
     )
     logger.info(" Loading test datasets finished")
 
-    return dataset_train, dataset_val, dataset_test
+    return normalizer_params, dataset_train, dataset_val, dataset_test
 
 
 def create_model(
@@ -348,6 +357,7 @@ def initialize_weights(model, training_options):
 
     if training_options["transfer_from"] is None:
         model.apply(init_tn_weights)
+        logger.info(" All model components initiated with random weights")
 
     # load pretrained network wegihts and biases
     else:
