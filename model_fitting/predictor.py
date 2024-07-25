@@ -539,7 +539,7 @@ class Predictor:
         ):
             raise AssertionError("The model is not initialized")
 
-        G, H, A, B, lambdas = self.compute_koopman_matrices(
+        G, H, A, B, lambdas = self.compute_model_matrices(
             self._y, self._encoder_jacobian
         )
         self._y = self.compute_next_lifted_state(G, H, self._y, u)

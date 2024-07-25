@@ -1,5 +1,4 @@
 import os, sys, json, torch
-print(os.getcwd())
 sys.path.append(os.getcwd())
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,19 +11,19 @@ from model_fitting.predictor import Predictor
 import logging
 logging.basicConfig(level=logging.INFO)
 
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Running on", device)
+
 logger = logging.getLogger(__name__)
 logger.info(" Running on %s", device)
 
 """ Adjust Parameters """
 ##################################################################################
-model_name = "catheter_1T_unforced_3.1"
-simulation_time = 0.800
+model_name = "catheter_1T_forced_4.3.1"
+simulation_time = 1.000
 sample_time_override = 2e-3
 # plot_index_list = [2, 21, 51, 61]
-plot_index_list = [5, 10, 15, 20, 25]
+plot_index_list = [5, 10, 15, 20]
 # plot_index_list = [21, 31, 41, 51, 73]
 # plot_index_list = [5, 24, 54, 64, 74]
 
@@ -95,7 +94,7 @@ def main():
     dataloader_test = DataLoader(dataset=dataset_test, shuffle=False)
     num_traj = len(dataloader_test)
     # num_traj = 20
-    print("Loading test datasets finished!")
+    logger.info(" Loading test datasets finished")
 
     """ Initialize simulation variables """
     ####################################################################################
