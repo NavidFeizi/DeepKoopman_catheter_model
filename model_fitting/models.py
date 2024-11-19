@@ -19,8 +19,10 @@ class MLP(nn.Module):
     def __init__(
         self,
         input_size,
-        hidden_sizes,
+        hidden_size,
+        num_layers,
         output_size,
+        extend_states=False,
         activation=None,
         input_normalizer_params=None,
         output_normalizer_params=None,
@@ -28,22 +30,24 @@ class MLP(nn.Module):
     ):
         super().__init__()
         self.input_size = input_size
-        self.hidden_sizes = hidden_sizes
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
         self.output_size = output_size
+        self.extend_states = extend_states
         self.input_normalizer_params = input_normalizer_params
         self.output_normalizer_params = output_normalizer_params
         
-        assert len(hidden_sizes) >= 1, "There must be at least one hidden layer"
+        assert num_layers >= 1, "There must be at least one hidden layer"
         # input layer
-        self.input_layer = nn.Linear(input_size, hidden_sizes[0])
+        self.input_layer = nn.Linear(input_size, hidden_size)
         # hidden layers
         hidden = []
         i = -1
-        for i in range(len(hidden_sizes) - 1):
-            hidden.append((nn.Linear(hidden_sizes[i], hidden_sizes[i + 1])))
+        for i in range(num_layers - 1):
+            hidden.append((nn.Linear(hidden_size, hidden_size)))
         self.hidden_layers = torch.nn.ModuleList(hidden)
         # output layer
-        self.output_layer = nn.Linear(hidden_sizes[i + 1], output_size)
+        self.output_layer = nn.Linear(hidden_size, output_size)
 
         if activation is None:
             self.act = lambda x: x
@@ -62,17 +66,20 @@ class MLP(nn.Module):
             self.y_max = torch.tensor(output_normalizer_params["params_x"]["max"], dtype=torch.float32)
 
     def forward(self, x):
-        # normalize the input if necessary
+        # normalize the input if necessary (for encoder)
         if self.input_normalizer_params is not None:
             x = (x - self.x_min) / (self.x_max - self.x_min)
         # itterdate over layers
-        x = self.input_layer(x)
-        x = self.act(x)
+        x = x.reshape(x.size(0), -1)
+        h = self.input_layer(x)
+        h = self.act(h)
         for layer in self.hidden_layers:
-            x = layer(x)
-            x = self.act(x)
-        y = self.output_layer(x)
-        # de normalize the input if necessary
+            h = layer(h)
+            h = self.act(h)
+        y = self.output_layer(h)
+        if self.extend_states:
+            y = torch.concat((x, y), axis=1)
+        # de normalize the input if necessary (for decoder)
         if self.output_normalizer_params is not None:
             y = y * (self.y_max - self.y_min) + self.y_min
         return y
@@ -164,55 +171,201 @@ class DoubleMLP(nn.Module):
     def get_inputsize(self):
         return self.input_size *2 
 
-# --- Linear Koopman Operator (just a constant A matrix) ---#
-class LinearKoopman(nn.Module):
+# --- Multilayer Perceptron with 2D delayed nput---#
+class DelayedMLP(nn.Module):
     def __init__(
         self,
-        dimension,
+        input_size,
+        hidden_size,
+        num_layers,
+        len_history,
+        output_size,
+        activation=None,
+        input_normalizer_params=None,
+        output_normalizer_params=None,
+        device = None,
     ):
         super().__init__()
-        self.dimension = dimension
-        self.linear_model_layer = nn.Linear(dimension, dimension, bias=False)
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.output_size = output_size
+        self.input_normalizer_params = input_normalizer_params
+        self.output_normalizer_params = output_normalizer_params
+        
+        assert num_layers >= 1, "There must be at least one hidden layer"
+        # input layer
+        self.input_layer = nn.Linear(input_size*len_history, hidden_size)
+        # hidden layers
+        hidden = []
+        i = -1
+        for i in range(num_layers - 1):
+            hidden.append((nn.Linear(hidden_size, hidden_size)))
+        self.hidden_layers = torch.nn.ModuleList(hidden)
+        # output layer
+        self.output_layer = nn.Linear(hidden_size, output_size)
+
+        if activation is None:
+            self.act = lambda x: x
+        elif type(activation) is str:
+            # self.act = getattr(nn.activation, activation)()
+            self.act = nn.ReLU()
+        else:
+            self.act = activation
+
+        if input_normalizer_params is not None:
+            self.x_min = torch.tensor(input_normalizer_params["params_x"]["min"], dtype=torch.float32)
+            self.x_max = torch.tensor(input_normalizer_params["params_x"]["max"], dtype=torch.float32)
+        
+        if output_normalizer_params is not None:
+            self.y_min = torch.tensor(output_normalizer_params["params_x"]["min"], dtype=torch.float32)
+            self.y_max = torch.tensor(output_normalizer_params["params_x"]["max"], dtype=torch.float32)
+
+    def forward(self, x):
+        # normalize the input if necessary
+        if self.input_normalizer_params is not None:
+            x = (x - self.x_min) / (self.x_max - self.x_min)
+        # itterdate over layers
+        x = self.input_layer(x)
+        x = self.act(x)
+        for layer in self.hidden_layers:
+            x = layer(x)
+            x = self.act(x)
+        y = self.output_layer(x)
+        # de normalize the input if necessary
+        if self.output_normalizer_params is not None:
+            y = y * (self.y_max - self.y_min) + self.y_min
+        return y
+
+    def get_inputsize(self):
+        return self.input_size
+
+# --- Long Short-Term Memory Network ---#
+class LSTM(nn.Module):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        output_size,
+        num_layers,
+        activation=None,
+        input_normalizer_params=None,
+        output_normalizer_params=None,
+        device=None,
+    ):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.num_layers = num_layers
+        self.input_normalizer_params = input_normalizer_params
+        self.output_normalizer_params = output_normalizer_params
+        
+        assert hidden_size >= 1, "There must be at least one hidden layer"
+        # input LSTM layer
+        self.lstm_layer = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        # output linear layer
+        self.output_layer = nn.Linear(hidden_size, output_size)
+
+        if activation is None:
+            self.act = lambda x: x
+        elif type(activation) is str:
+            self.act = nn.ReLU()
+        else:
+            self.act = activation
+
+        if input_normalizer_params is not None:
+            self.x_min = torch.tensor(input_normalizer_params["params_x"]["min"], dtype=torch.float32, device=device)
+            self.x_max = torch.tensor(input_normalizer_params["params_x"]["max"], dtype=torch.float32, device=device)
+        
+        if output_normalizer_params is not None:
+            self.y_min = torch.tensor(output_normalizer_params["params_x"]["min"], dtype=torch.float32, device=device)
+            self.y_max = torch.tensor(output_normalizer_params["params_x"]["max"], dtype=torch.float32, device=device)
+
+    def forward(self, x):
+        # Normalize the input if necessary
+        if self.input_normalizer_params is not None:
+            x = (x - self.x_min) / (self.x_max - self.x_min)
+        
+        # Processing the input through the input LSTM layer
+        x, (hn, cn) = self.lstm_layer(x)
+
+        # Passing the output of the last LSTM layer through the output linear layer
+        y = self.output_layer(x[:, -1, :])  # Assuming you want the last time step for prediction
+        
+        # Denormalize the output if necessary
+        if self.output_normalizer_params is not None:
+            y = y * (self.y_max - self.y_min) + self.y_min
+        return y
+
+# --- Linear Koopman Operator (just a constant A matrix) ---#
+class TrainableA(nn.Module):
+    def __init__(
+        self,
+        states_dim,
+    ):
+        super().__init__()
+        self.dimension = states_dim
+        self.linear_model_layer = nn.Linear(states_dim, states_dim, bias=False)
 
     def forward(self, x):
         y = self.linear_model_layer(x)
-        return y, y
+        return y
 
-# --- Linear Koopman Operator with Input---#
-class LinearKoopmanWithInput(nn.Module):
+# --- Linear Koopman - actuation input part (just a constant B matrix) ---#
+class TrainableB(nn.Module):
     def __init__(
         self,
-        lifted_states_dimension,
-        inpus_dimension,
+        states_dim,
+        inputs_dim
     ):
         super().__init__()
-        self.lifted_states_dimension = lifted_states_dimension
-        self.inpus_dimension = inpus_dimension
-        self.A = nn.Linear(lifted_states_dimension, lifted_states_dimension, bias=False)
-        self.B = nn.Linear(inpus_dimension, lifted_states_dimension, bias=False)
+        self.linear_model_layer = nn.Linear(inputs_dim, states_dim, bias=False)
 
-    def forward(self, x, u):
-        y = self.A(x) + self.B(u)
-        return y, y
+    def forward(self, u):
+        y = self.linear_model_layer(u)
+        return y
 
 # --- Full model including encoder, constant Koopman operator, and decoder ---#
 class CombinedDeepKoopman(nn.Module):
-    def __init__(self, encoder, koopman, decoder):
+    def __init__(self, encoder, states_matrix, actuation_matrix, decoder):
         super().__init__()
         self.encoder = encoder
-        self.koopman = koopman
+        self.states_matrix = states_matrix
+        self.actuation_matrix = actuation_matrix
         self.decoder = decoder
 
     def forward(self, x):
         y = self.encoder(x)
-        y_plus, _ = self.koopman(y)
+        y_plus = self.states_matrix(y)[0] + self.actuation_matrix(y)[0]
         x_plus = self.decoder(y_plus)
         return y, y_plus, x_plus
     
     def requires_grad_(self, status):
         self.encoder.requires_grad_(status)
-        self.koopman.requires_grad_(status)
+        self.states_matrix.requires_grad_(status)
+        self.actuation_matrix.requires_grad_(status)
         self.decoder.requires_grad_(status)
+
+# --- Full model including encoder, constant Koopman operator, and decoder ---#
+class CombinedDeepKoopman_without_decoder(nn.Module):
+    def __init__(self, encoder, states_matrix, actuation_matrix):
+        super().__init__()
+        self.encoder = encoder
+        self.states_matrix = states_matrix
+        self.actuation_matrix = actuation_matrix
+
+    def forward(self, x):
+        y = self.encoder(x)
+        y_plus = self.states_matrix(y)[0] + self.actuation_matrix(y)[0]
+        x_plus = y_plus[0:self.encoder.get_inputsize()]
+        return y, y_plus, x_plus
+    
+    def requires_grad_(self, status):
+        self.encoder.requires_grad_(status)
+        self.states_matrix.requires_grad_(status)
+        self.actuation_matrix.requires_grad_(status)
+
 
 # --- An auxiliary network for predicting Eigen values of the Koopman operator ---#
 class States_Auxiliary(nn.Module):
@@ -248,7 +401,7 @@ class States_Auxiliary(nn.Module):
         return  Lambdas
 
 # --- Universal space varying (Eigen values varying) Koopman Operator based on Bethany Lusch Nature paper ---#
-class TrainableKoopmanDynamics(nn.Module):
+class VariableKoopman(nn.Module):
     def __init__(self, num_complexeigens_pairs, num_realeigens, sample_time, structure="Jordan"):
         """
         Initialize the module with n complex Jordan blocks and m real eigenvalues.
@@ -259,7 +412,7 @@ class TrainableKoopmanDynamics(nn.Module):
         m (int): Number of real eigenvalues.
         dt (float): Time step delta t.
         """
-        super(TrainableKoopmanDynamics, self).__init__()
+        super(VariableKoopman, self).__init__()
         self.num_complexeigens_pairs = num_complexeigens_pairs  # num Complex Pairs of Eigen values
         self.num_realeigens = num_realeigens  # num Real Eigen values
         self.sample_time = sample_time
@@ -510,3 +663,23 @@ class CombinedKoopman_withAux_withInput(nn.Module):
         # Reshape y_plus back to original shape if necessary
         y_plus = y_plus.view(y.shape)
         return y_plus
+
+
+# Obsolete models
+
+# --- Linear Koopman Operator with Input---#
+class LinearKoopmanWithInput(nn.Module):
+    def __init__(
+        self,
+        lifted_states_dimension,
+        inpus_dimension,
+    ):
+        super().__init__()
+        self.lifted_states_dimension = lifted_states_dimension
+        self.inpus_dimension = inpus_dimension
+        self.A = nn.Linear(lifted_states_dimension, lifted_states_dimension, bias=False)
+        self.B = nn.Linear(inpus_dimension, lifted_states_dimension, bias=False)
+
+    def forward(self, x, u):
+        y = self.A(x) + self.B(u)
+        return y, y

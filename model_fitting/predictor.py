@@ -5,7 +5,7 @@ from model_fitting.models import (
     DoubleMLP,
     States_Auxiliary,
     Input_Auxiliary,
-    TrainableKoopmanDynamics,
+    VariableKoopman,
     CombinedKoopman_withAux_withInput,
 )
 from typing import Optional, Dict, Any, Tuple, List
@@ -158,7 +158,7 @@ class Predictor:
         Returns:
             torch.nn.Module: Initialized Koopman dynamics model, moved to GPU if available and specified.
         """
-        model = TrainableKoopmanDynamics(
+        model = VariableKoopman(
             num_complexeigens_pairs=model_dict["num_complexeigens_pairs"],
             num_realeigens=model_dict["num_realeigens"],
             sample_time=self._sample_time,

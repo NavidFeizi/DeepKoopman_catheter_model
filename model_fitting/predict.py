@@ -1,4 +1,5 @@
 import os, sys, json, torch
+
 sys.path.append(os.getcwd())
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,8 +8,10 @@ from mpl_toolkits.mplot3d import Axes3D
 from torch.utils.data import DataLoader, Dataset
 from model_fitting.utils import MLPDataset
 from model_fitting.predictor import Predictor
+import pandas as pd
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -19,12 +22,13 @@ logger.info(" Running on %s", device)
 
 """ Adjust Parameters """
 ##################################################################################
-model_name = "catheter_1T_forced_4.3.1"
-simulation_time = 1.000
+model_name = "catheter_1T_unforced_4.3.2"
+dataset_override = "catheter_1T_unforced_4.3.test" #"catheter_1T_unforced_4.3" #"catheter_1T_forced_5.2.test"
+simulation_time = 1.0
 sample_time_override = 2e-3
 # plot_index_list = [2, 21, 51, 61]
-plot_index_list = [5, 10, 15, 20]
-# plot_index_list = [21, 31, 41, 51, 73]
+plot_index_list = [2, 5, 7]
+# plot_index_list = [5, 10, 17]
 # plot_index_list = [5, 24, 54, 64, 74]
 
 states_name = ["$x$", "$\dot{x}$", "$z$", "$\dot{z}$"]  # Example state names
@@ -52,9 +56,14 @@ def main():
         raise FileNotFoundError(error_message)
 
     #### load dataset_info json file
-    datasets_dir = os.path.join(
-        os.getcwd(), "datasets", model_info["dataset_options"]["dataset_name"]
-    )
+    if dataset_override is not None:
+        datasets_dir = os.path.join(
+            os.getcwd(), "datasets", dataset_override
+        )
+    else:
+        datasets_dir = os.path.join(
+            os.getcwd(), "datasets", model_info["dataset_options"]["dataset_name"]
+        )
     dataset_info_path = os.path.join(datasets_dir, "dataset_info.json")
     if os.path.isfile(dataset_info_path):
         with open(dataset_info_path, "r") as fp:
@@ -201,6 +210,7 @@ def main():
     ####################################################################################
     print("Predicting...")
     for i, (x, u, _) in enumerate(dataloader_test):
+        print("data number: ", i, "/", len(dataloader_test))
         # if i >= 20:
         #     break
         Xp_list = []  ## truth value of x_plus from advanced x
@@ -217,10 +227,12 @@ def main():
         Xobs_list = []
 
         ### save for cpp code test
-        if i == 57:
+        if i == 17:
+            header = "x1,x2,x3,x4,u"
             np.savetxt(
-                os.path.join(model_dir, "trajectory_57.csv"),
+                os.path.join(model_dir, "trajectory_17.csv"),
                 torch.concat((x, u), dim=2).squeeze(0).numpy(),
+                header=header,
                 delimiter=",",
             )
 
@@ -237,15 +249,14 @@ def main():
         # X0 = x[:, 0, :]
         # y, encoder_jacobian = pred.encode(x=X0, requires_grad=True)
         # # pred.load_script_model(X0)
-
         # for j in range(num_pred_steps):
         #     G, H, A_, B_, Lambdas_ = pred.compute_model_matrices(y, None)
         #     y = pred.compute_next_lifted_state(G, H, y, u[:, j, :])
         #     Yp_pred_list.append(y)
         #     Xp_pred_list.append(pred.decode(y)[0])
         #     Lambdas_list.append(Lambdas_)
-        #     B_list.append(H)
-        #     A_list.append(G)
+        #     B_list.append(B_)
+        #     A_list.append(A_)
         #     U_list.append(u[:, j, :])
 
         # Yp_list = pred.lift_a_trajectory(x=x)
@@ -263,7 +274,6 @@ def main():
         U[i, :, :] = torch.stack(U_list, dim=1).detach().numpy()[0, :, :]
         A[i, :, :] = torch.stack(A_list, dim=1).detach().numpy()[0, :, :, :]
         B[i, :, :] = torch.stack(B_list, dim=1).detach().numpy()[0, :, :, :]
-        
 
     # Xp = inverse_normalize(Xp, model_info["normalizer_params"]["params_x"])
     # Xp_pred = inverse_normalize(Xp_pred, model_info["normalizer_params"]["params_x"])
@@ -275,6 +285,8 @@ def main():
     errors_Xrecon = np.abs(Xrecon - Xp)
     errors_Xp_pred = np.abs(Xp_pred - Xp)
     errors_Yp_pred = np.abs(Yp_pred - Yp)
+
+    save_to_csv(Xp, Xp_pred, Yp, Yp_pred, errors_Xp_pred, errors_Xrecon, Lambdas, model_dir)
 
     #### Plot - Errors """
     plot_errors(Xp, errors_Xp_pred, errors_Xrecon, states_name, model_dir, save=True)
@@ -702,7 +714,7 @@ def plot_lifted_states(
         )
 
 
-def plot_errors(Xp, X_errors, ED_errors, states_name, save_dir, save=False):
+def plot_errors(Xp, X_errors, recon_errors, states_name, save_dir, save=False):
     print("Plotting errors...")
     fig, axs = plt.subplots(2, 2, figsize=(7, 5))
 
@@ -781,9 +793,9 @@ def plot_errors(Xp, X_errors, ED_errors, states_name, save_dir, save=False):
             )
 
     # Group 2: Dimensions 0, 2, and 4
-    indices = list(range(0, ED_errors.shape[2], 2))
-    mag_error = np.sqrt(sum(ED_errors[:, :, idx] ** 2 for idx in indices))
-    errors = [ED_errors[:, :, i].flatten() for i in indices]
+    indices = list(range(0, recon_errors.shape[2], 2))
+    mag_error = np.sqrt(sum(recon_errors[:, :, idx] ** 2 for idx in indices))
+    errors = [recon_errors[:, :, i].flatten() for i in indices]
     # errors = []
     errors.append(mag_error.flatten())
 
@@ -818,9 +830,9 @@ def plot_errors(Xp, X_errors, ED_errors, states_name, save_dir, save=False):
             )
 
     # Group 2: Dimensions 1, 3, and 5
-    indices = list(range(+1, ED_errors.shape[2] + 1, 2))
-    mag_error = np.sqrt(sum(ED_errors[:, :, idx] ** 2 for idx in indices))
-    errors = [ED_errors[:, :, i].flatten() for i in indices]
+    indices = list(range(+1, recon_errors.shape[2] + 1, 2))
+    mag_error = np.sqrt(sum(recon_errors[:, :, idx] ** 2 for idx in indices))
+    errors = [recon_errors[:, :, i].flatten() for i in indices]
     # errors = []
     errors.append(mag_error.flatten())
 
@@ -1204,6 +1216,25 @@ def plot_encoder_map(Yp, Xp, save_dir, save=False):
             os.path.join(save_dir, "PNG/Decoder_map.png"), format="png", dpi=300
         )
 
+
+def save_to_csv(Xp, Xp_pred, Yp, Yp_pred, errors_Xp_pred, errors_Xrecon, Lambdas, save_dir):
+    
+    # Get the first dimension size to determine the number of files
+    N = Yp.shape[0]
+
+    column_names = ['x1', 'x2', 'x3', 'x4', 'xp1', 'xp2', 'xp3', 'xp4', 'y1', 'y2', 'yp1', 'yp2', 'e_x1', 'e_x2', 'e_x3', 'e_x4', 'e_rec1', 'e_rec2', 'e_rec3', 'e_rec4',  'l_mu', 'l_omega']  # Adjust the number of columns as needed
+    
+    for i in range(N):
+        data_slice = np.concatenate((Xp[i, :, :], Xp_pred[i, :, :], Yp[i, :, :], Yp_pred[i, :, :], errors_Xp_pred[i, :, :], errors_Xrecon[i, :, :], Lambdas[i, :, :]), axis = 1)
+        df = pd.DataFrame(data_slice, columns=column_names)
+        
+        # Save DataFrame to CSV
+        filename = f'result_{i+1}.csv'
+        csv_dir = os.path.join(save_dir, 'csv', 'pred')
+        if not os.path.exists(csv_dir):
+            os.makedirs(csv_dir)
+        df.to_csv(os.path.join(csv_dir, filename), index=False, float_format='%.6f')
+    print('Saved in CSV folder')
 
 if __name__ == "__main__":
     main()

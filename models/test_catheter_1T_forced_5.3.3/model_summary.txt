@@ -1,0 +1,24 @@
+CombinedDeepKoopman(
+  (encoder): MLP(
+    (input_layer): Linear(in_features=4, out_features=128, bias=True)
+    (hidden_layers): ModuleList(
+      (0-2): 3 x Linear(in_features=128, out_features=128, bias=True)
+    )
+    (output_layer): Linear(in_features=128, out_features=20, bias=True)
+    (act): ReLU()
+  )
+  (states_matrix): TrainableA(
+    (linear_model_layer): Linear(in_features=20, out_features=20, bias=False)
+  )
+  (actuation_matrix): TrainableB(
+    (linear_model_layer): Linear(in_features=1, out_features=20, bias=False)
+  )
+  (decoder): MLP(
+    (input_layer): Linear(in_features=20, out_features=128, bias=True)
+    (hidden_layers): ModuleList(
+      (0-2): 3 x Linear(in_features=128, out_features=128, bias=True)
+    )
+    (output_layer): Linear(in_features=128, out_features=4, bias=True)
+    (act): ReLU()
+  )
+)

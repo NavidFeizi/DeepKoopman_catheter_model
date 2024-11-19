@@ -29,14 +29,17 @@ from model_fitting.loss_functions import (
 from model_fitting.models import (
     MLP,
     DoubleMLP,
+    DelayedMLP,
     States_Auxiliary,
     Input_Auxiliary,
-    LinearKoopman,
+    TrainableA, 
+    TrainableB,
     LinearKoopmanWithInput,
-    TrainableKoopmanDynamics,
+    VariableKoopman,
     CombinedDeepKoopman,
     CombinedKoopman_withAux_withoutInput,
     CombinedKoopman_withAux_withInput,
+    CombinedDeepKoopman_without_decoder,
 )
 
 from config import (
@@ -46,8 +49,7 @@ from config import (
     koopman_params,
     encoder_params,
     decoder_params,
-    states_auxiliary_params,
-    inputs_auxiliary_params,
+    inputs_params,
     DEVICE,
     model_dir,
 )
@@ -67,9 +69,7 @@ def main():
             dataset_info = json.load(fp)
         dataset_options["seq_length"] = dataset_info["sequence_length"]
         dataset_options["test_seq_length"] = dataset_info["test_sequence_length"]
-        dataset_options["sample_time_new"] = (
-            dataset_info["sample_time"] * dataset_options["sample_step"]
-        )
+        dataset_options["sample_time_new"] = (dataset_info["sample_time"] * dataset_options["sample_step"])
         koopman_params["sample_time"] = dataset_options["sample_time_new"]
         encoder_params["sample_time"] = dataset_options["sample_time_new"]
     else:
@@ -94,11 +94,10 @@ def main():
 
     # Create the model structure
     model = create_model(
-        encoder_params,
-        decoder_params,
-        states_auxiliary_params,
-        inputs_auxiliary_params,
-        koopman_params,
+        encoder_params=encoder_params,
+        decoder_params=decoder_params,
+        koopman_params=koopman_params,
+        inputs_params=inputs_params,
     )
 
     # Initialize model weights
@@ -125,10 +124,9 @@ def main():
     model_parameters = {
         "model_details": MODEL_DETAILS.copy(),
         "encoder_parameters": encoder_params.copy(),
-        "decoder_parameters": decoder_params.copy(),
-        "states_auxiliary_parameters": states_auxiliary_params.copy(),
+        "decoder_parameters": decoder_params,
         "koopman_parameters": koopman_params.copy(),
-        "inputs_auxiliary_parameters": inputs_auxiliary_params.copy(),
+        "inputs_parameters": inputs_params.copy(),
     }
     save_model_info(
         model_dir,
@@ -266,9 +264,8 @@ def load_datasets(datasets_dir, dataset_options, normalizer_params):
 def create_model(
     encoder_params,
     decoder_params,
-    states_auxiliary_params,
-    inputs_auxiliary_params,
     koopman_params,
+    inputs_params,
 ):
     """
     Defining the architecture and instantiating the components of the model
@@ -279,16 +276,29 @@ def create_model(
     if encoder_params["architecture"] == "MLP":
         encoder = MLP(
             input_size=encoder_params["state_size"],
-            hidden_sizes=encoder_params["hidden_sizes"],
-            output_size=encoder_params["lifted_state_size"],
+            hidden_size=encoder_params["hidden_size"],
+            num_layers=encoder_params["num_layers"],
+            output_size=encoder_params["output_size"],
+            extend_states=encoder_params["extend_lifted_state"],
             activation=encoder_params["activation"],
             input_normalizer_params=None,
         ).to(DEVICE)
     elif encoder_params["architecture"] == "DualMLP":
         encoder = DoubleMLP(
             input_size=encoder_params["state_size"],
-            hidden_sizes=encoder_params["hidden_sizes"],
-            output_size=encoder_params["lifted_state_size"],
+            hidden_size=encoder_params["hidden_size"],
+            num_layers=encoder_params["num_layers"],
+            output_size=encoder_params["output_size"],
+            activation=encoder_params["activation"],
+            input_normalizer_params=None,
+        ).to(DEVICE)
+    elif encoder_params["architecture"] == "DelayedMLP":
+        encoder = DelayedMLP(
+            input_size=encoder_params["state_size"],
+            hidden_size=encoder_params["hidden_size"],
+            num_layers=encoder_params["num_layers"],
+            len_history=encoder_params["len_history"],
+            output_size=encoder_params["output_size"],
             activation=encoder_params["activation"],
             input_normalizer_params=None,
         ).to(DEVICE)
@@ -301,42 +311,80 @@ def create_model(
         )
 
     # Initialize decoder
-    decoder = MLP(
-        input_size=decoder_params["lifted_state_size"],
-        hidden_sizes=decoder_params["hidden_sizes"],
-        output_size=decoder_params["state_size"],
-        activation=decoder_params["activation"],
-        output_normalizer_params=None,
-    ).to(DEVICE)
-
-    # Initialize states auxiliary network
-    states_auxiliary = States_Auxiliary(
-        num_complexeigens_pairs=states_auxiliary_params["num_complexeigens_pairs"],
-        num_realeigens=states_auxiliary_params["num_realeigens"],
-        hidden_sizes=states_auxiliary_params["hidden_sizes"],
-        activation=states_auxiliary_params["activation"],
-    ).to(DEVICE)
-
-    # Initialize inputs auxiliary network
-    inputs_auxiliary = Input_Auxiliary(
-        input_size=inputs_auxiliary_params["lifted_state_size"],
-        hidden_sizes=inputs_auxiliary_params["hidden_sizes"],
-        output_shape=inputs_auxiliary_params["output_shape"],
-        activation=inputs_auxiliary_params["activation"],
-    ).to(DEVICE)
+    if decoder_params is not None:
+        if decoder_params["architecture"] == "MLP":
+            decoder = MLP(
+                input_size=decoder_params["lifted_state_size"],
+                hidden_size=decoder_params["hidden_size"],
+                num_layers=decoder_params["num_layers"],
+                output_size=decoder_params["state_size"],
+                extend_states=encoder_params["extend_lifted_state"],
+                activation=decoder_params["activation"],
+                output_normalizer_params=None,
+            ).to(DEVICE)
+        elif decoder_params["architecture"] == "DelayedMLP":
+            decoder = DelayedMLP(
+                input_size=decoder_params["lifted_state_size"],
+                hidden_size=decoder_params["hidden_size"],
+                num_layers=decoder_params["num_layers"],
+                len_history=decoder_params["len_history"],
+                output_size=decoder_params["state_size"],
+                activation=decoder_params["activation"],
+                input_normalizer_params=None,
+            ).to(DEVICE)
+        else:
+            logger.error(
+                "Unsupported decoder architecture: %s", decoder_params["architecture"]
+            )
+            raise ValueError(
+                f"Unsupported decoder architecture: {decoder_params['architecture']}"
+            )
 
     # Initialize Koopman operator
-    koopman_operator = TrainableKoopmanDynamics(
-        num_complexeigens_pairs=koopman_params["num_complexeigens_pairs"],
-        num_realeigens=koopman_params["num_realeigens"],
-        sample_time=koopman_params["sample_time"],
-        structure=koopman_params["structure"],  # "Jordan", "Controlable"
-    ).to(DEVICE)
+    if koopman_params["space_varying"]:
+        koopman_operator = VariableKoopman(
+            num_complexeigens_pairs=koopman_params["num_complexeigens_pairs"],
+            num_realeigens=koopman_params["num_realeigens"],
+            sample_time=koopman_params["sample_time"],
+            structure=koopman_params["structure"],  # "Jordan", "Controlable"
+        ).to(DEVICE)
+        states_auxiliary = States_Auxiliary(
+            num_complexeigens_pairs=koopman_params["auxiliary_params"]["num_complexeigens_pairs"],
+            num_realeigens=koopman_params["auxiliary_params"]["num_realeigens"],
+            hidden_sizes=koopman_params["auxiliary_params"]["hidden_sizes"],
+            activation=koopman_params["auxiliary_params"]["activation"],
+        ).to(DEVICE)
+        inputs_auxiliary = Input_Auxiliary(
+            input_size=inputs_params["inputs_auxiliary_params"]["lifted_state_size"],
+            hidden_sizes=inputs_params["inputs_auxiliary_params"]["hidden_sizes"],
+            output_shape=inputs_params["inputs_auxiliary_params"]["output_shape"],
+            activation=inputs_params["inputs_auxiliary_params"]["activation"],
+        ).to(DEVICE)
+    else:
+        states_matrix = TrainableA(
+            states_dim=koopman_params["lifted_state_size"],
+        ).to(DEVICE)
+        actuation_matrix = TrainableB(
+            states_dim=koopman_params["lifted_state_size"],
+            inputs_dim=inputs_params["system_input_size"],
+        ).to(DEVICE)
+
 
     # Combine all components into the final model
-    model = CombinedKoopman_withAux_withInput(
-        encoder, states_auxiliary, koopman_operator, decoder, inputs_auxiliary
-    )
+    if koopman_params["space_varying"]:
+        model = CombinedKoopman_withAux_withInput(
+            encoder, states_auxiliary, koopman_operator, decoder, inputs_auxiliary
+        )
+    else:
+        if decoder_params is None:
+            model = CombinedDeepKoopman_without_decoder(
+                encoder=encoder, states_matrix=states_matrix, actuation_matrix=actuation_matrix
+            )
+        else:
+            model = CombinedDeepKoopman(
+                encoder=encoder, states_matrix=states_matrix, actuation_matrix=actuation_matrix, decoder=decoder
+            )
+            
 
     logger.info(" Model created successfully")
     return model
@@ -448,14 +496,9 @@ def save_model_info(
     """
     info = {
         "encoder_params": model_parameters["encoder_parameters"].copy(),
-        "decoder_params": model_parameters["decoder_parameters"].copy(),
-        "states_auxiliary_params": model_parameters[
-            "states_auxiliary_parameters"
-        ].copy(),
+        "decoder_params": model_parameters["decoder_parameters"],
         "koopman_params": model_parameters["koopman_parameters"].copy(),
-        "inputs_auxiliary_params": model_parameters[
-            "inputs_auxiliary_parameters"
-        ].copy(),
+        "inputs_params": model_parameters["inputs_parameters"].copy(),
         "normalizer_params": normalizer_params.copy(),
         "training_options": training_options.copy(),
         "dataset_options": dataset_options.copy(),

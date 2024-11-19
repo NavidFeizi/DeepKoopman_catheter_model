@@ -1,0 +1,48 @@
+{
+    "name": "Catheter_1T_forced_3.1",
+    "states": [
+        "x",
+        "x_dot",
+        "z",
+        "z_dot"
+    ],
+    "inputs": [
+        "q_0"
+    ],
+    "sample_time": 0.002,
+    "train_dataset_size": 6800,
+    "val_dataset_size": 800,
+    "test_dataset_size": 36,
+    "sequence_length": 50,
+    "test_sequence_length": 500,
+    "num_sequence": 200,
+    "test_num_sequence": 18,
+    "input_type": "displacement",
+    "desc": " experimental data - cleand and filtered - tendon was actuated with multisine random displacements - instead of 2 tendos, negative value for one tendon is used",
+    "signal_generator_params": {
+        "num_samples": 15000,
+        "numWaves": 7,
+        "minFrequency": 0.0,
+        "maxFrequency": 2.0,
+        "minAmplitude": 0.0,
+        "maxAmplitude": 0.006,
+        "sampleTime": 0.002
+    },
+    "Cosserat_model_params": {
+        "E": 15467953664.741138,
+        "nu": 0.385,
+        "G": 5584098795.935429,
+        "radius": 0.0004001769660928,
+        "mass": 0.000516,
+        "Length": 0.055,
+        "T": 30,
+        "dt": 0.002,
+        "basePlateToMotor": 1.19,
+        "tendonOffset": 0.00112,
+        "tendonCompliance": 0.000252,
+        "alpha": 0.0,
+        "dampingBendTwist": 8.5e-07,
+        "dampingShearExt": 7.5e-06,
+        "airDragCoeff": 2.81e-05
+    }
+}

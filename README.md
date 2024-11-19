@@ -1,12 +1,12 @@
 <div align="center">
 
-# Deep Koopman Cathter Model
+# Deep Koopman Catheter Model
 
 </div>
 
 ## Introduction
-A deeplearning based Koopman approach for modeling the nonlinear dynamics of tendon driven continuum robots.
-This repository contains the codes for training the model networks usign Pytroch.
+A deep learning based Koopman approach for modeling the nonlinear dynamics of tendon driven continuum robots.
+This repository contains codes for training the model networks usign PyTroch.
 This project aims to train a dynamical model of tendon-driven continuum robots using the deep Koopman approach. The code is organized into several modules to handle different aspects of the model, including data loading, model architecture, training, and prediction.
 
 ![Diagram](./figures/Diagram.png)

@@ -1,0 +1,22 @@
+{
+    "name": "Catheter_1T_expt_5.2",
+    "states": [
+        "x",
+        "x_dot",
+        "z",
+        "z_dot"
+    ],
+    "inputs": [
+        "q_0"
+    ],
+    "sample_time": 0.002,
+    "train_dataset_size": 7500,
+    "val_dataset_size": 1200,
+    "test_dataset_size": 20,
+    "sequence_length": 40,
+    "test_sequence_length": 500,
+    "num_sequence": 150,
+    "test_num_sequence": 10,
+    "input_type": "displacement",
+    "desc": " experimental data - cleand and filtered - tendon was actuated with steplike random displacements - instead of 2 tendos, negative value for one tendon is used - extra mass at tip"
+}

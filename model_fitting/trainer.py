@@ -64,8 +64,8 @@ class Trainer:
 
         self._norm_factor = 1
         self._epoch = 0
-        self._save_step = 20
-        self._plot_step = 20
+        self._save_step = 10
+        self._plot_step = 10
 
         if self._sequence_length is None:
             raise ValueError("seuqnece length cannot be None")
@@ -116,10 +116,11 @@ class Trainer:
         encoder_dict["state_dict"] = self._model.encoder.state_dict()
         save_component("Encoder", encoder_dict, "encoder.pt")
 
-        # Save decoder separately
-        decoder_dict = copy.deepcopy(self._model_parameters["decoder_parameters"])
-        decoder_dict["state_dict"] = self._model.decoder.state_dict()
-        save_component("Decoder", decoder_dict, "decoder.pt")
+        # Save decoder separately, if exists
+        if hasattr(self._model, "decoder"):
+            decoder_dict = copy.deepcopy(self._model_parameters["decoder_parameters"])
+            decoder_dict["state_dict"] = self._model.decoder.state_dict()
+            save_component("Decoder", decoder_dict, "decoder.pt")
 
         # Save states auxiliary separately, if exists
         if hasattr(self._model, "states_auxiliary"):
@@ -130,9 +131,10 @@ class Trainer:
             save_component("States auxiliary", states_aux_dict, "states_auxiliary.pt")
 
         # Save Koopman operator separately
-        koopman_dict = copy.deepcopy(self._model_parameters["koopman_parameters"])
-        koopman_dict["state_dict"] = self._model.koopman.state_dict()
-        save_component("Koopman operator", koopman_dict, "koopman.pt")
+        if hasattr(self._model, "koopman"):
+            koopman_dict = copy.deepcopy(self._model_parameters["koopman_parameters"])
+            koopman_dict["state_dict"] = self._model.koopman.state_dict()
+            save_component("Koopman operator", koopman_dict, "koopman.pt")
 
         # Save inputs auxiliary separately, if exists
         if hasattr(self._model, "inputs_auxiliary"):
@@ -141,6 +143,23 @@ class Trainer:
             )
             inputs_aux_dict["state_dict"] = self._model.inputs_auxiliary.state_dict()
             save_component("Inputs auxiliary", inputs_aux_dict, "inputs_auxiliary.pt")
+        
+        # Save inputs auxiliary separately, if exists
+        if hasattr(self._model, "states_matrix"):
+            states_matrix_dict = copy.deepcopy(
+                self._model_parameters["koopman_parameters"]
+            )
+            states_matrix_dict["state_dict"] = self._model.states_matrix.state_dict()
+            save_component("States matrix", states_matrix_dict, "states_matrix.pt")
+
+        # Save inputs auxiliary separately, if exists
+        if hasattr(self._model, "actuation_matrix"):
+            actuation_matrix_dict = copy.deepcopy(
+                self._model_parameters["inputs_parameters"]
+            )
+            actuation_matrix_dict["state_dict"] = self._model.actuation_matrix.state_dict()
+            save_component("Actuation matrix", actuation_matrix_dict, "actuation_matrix.pt")
+
 
         if log:
             logger.info(" Trained model saved successfully")
@@ -298,34 +317,50 @@ class Trainer:
         Yp_list, Yp_pred_list, Xp_list, Xp_pred_list = [], [], [], []
 
         # Reconstruct the first state using the autoencoder
-        x0 = X[:, 0, :]
-        x0_pred = self._model.decoder(self._model.encoder(x0))
+        len_history = self._model_parameters["encoder_parameters"]["len_history"]
+        x0_h = X[:, 0:len_history, :]
+        x0 = X[:, len_history-1, :]
+        if not self._model_parameters["encoder_parameters"]["extend_lifted_state"]:
+            x0_pred = self._model.decoder(self._model.encoder(x0))
+        else:
+            x0_pred = self._model.encoder(x0_h)[:, 0:self._model_parameters["encoder_parameters"]["state_size"]].unsqueeze(1)  ## this line is temporary and must be fixed professionaly
+            x0_pred = x0  ## temporarly
 
-        x = X[:, 0, :]
+        x = X[:, 0:len_history, :]
         x.requires_grad_(self._training_parameters["train_encoder"])
         # y, encoder_jacobian = self.encode(x=x, requires_grad=True)
         y = self._model.encoder(x)
 
         # Loop over the sequence steps
-        for j in range(self._sequence_length - 1):
-            lambdas = self._model.states_auxiliary(y)
-            y_unfroced, G, A = self._model.koopman(y, lambdas)  ## unforced part
-            B = self._model.inputs_auxiliary(y)
+        
+        for j in range(len_history - 1, self._sequence_length - 1, 1):
+            if hasattr(self._model, 'states_auxiliary'):        ## if the model is space varying
+                lambdas = self._model.states_auxiliary(y)
+                y_unfroced, G, A = self._model.koopman(y, lambdas)  ## unforced part
+                B = self._model.inputs_auxiliary(y)
 
-            #### this is for direct use of estimated B as B_Phi - may need to be cahnges according to the structure
-            B_phi = B
-            # B_phi = torch.matmul(encoder_jacobian, B)
-            identity_matrix = torch.eye(y.shape[1], device=y.device)
-            temp = torch.matmul(torch.inverse(A), (G - identity_matrix))
-            H = torch.matmul(temp, B_phi)
+                #### this is for direct use of estimated B as B_Phi - may need to be cahnges according to the structure
+                B_phi = B
+                # B_phi = torch.matmul(encoder_jacobian, B)
+                identity_matrix = torch.eye(y.shape[1], device=y.device)
+                temp = torch.matmul(torch.inverse(A), (G - identity_matrix))
+                H = torch.matmul(temp, B_phi)
 
-            # control input part
-            y_froced = torch.matmul(H, u[:, j, :].unsqueeze(-1)).squeeze(-1)
-            y = y_unfroced + y_froced
+                # control input part
+                y_froced = torch.matmul(H, u[:, j, :].unsqueeze(-1)).squeeze(-1)
+                y = y_unfroced + y_froced
+
+            else:
+                y = self._model.states_matrix(y) + self._model.actuation_matrix(u[:, j, :]) 
+
             Yp_pred_list.append(y)
-            Yp_list.append(self._model.encoder(X[:, j + 1, :]))
+            Yp_list.append(self._model.encoder(X[:, j-len_history+1:j+1, :]))
             if j < self._training_parameters["num_pred_steps"]:
-                x = self._model.decoder(y)
+                if not self._model_parameters["encoder_parameters"]["extend_lifted_state"]:
+                    x = self._model.decoder(y)
+                else:
+                    x = y[:, 0:self._model_parameters["encoder_parameters"]["state_size"]]  ## this line is temporary and must be fixed professionaly
+
                 Xp_pred_list.append(x)
                 Xp_list.append(X[:, j + 1, :])
 
@@ -457,13 +492,24 @@ class Trainer:
 
         # Enable gradients for relevant parts of the model
         self._model.encoder.requires_grad_(self._training_parameters["train_encoder"])
-        self._model.decoder.requires_grad_(self._training_parameters["train_decoder"])
-        self._model.states_auxiliary.requires_grad_(
-            self._training_parameters["train_states_auxiliary"]
-        )
-        self._model.inputs_auxiliary.requires_grad_(
-            self._training_parameters["train_inputs_auxiliary"]
-        )
+        if hasattr(self._model, 'decoder'):
+            self._model.decoder.requires_grad_(self._training_parameters["train_decoder"])
+        if hasattr(self._model, 'states_auxiliary'):
+            self._model.states_auxiliary.requires_grad_(
+                self._training_parameters["train_states_auxiliary"]
+            )
+        if hasattr(self._model, 'inputs_auxiliary'):
+            self._model.inputs_auxiliary.requires_grad_(
+                self._training_parameters["train_inputs_auxiliary"]
+            )
+        if hasattr(self._model, 'states_matrix'):
+            self._model.states_matrix.requires_grad_(
+                self._training_parameters["train_A"]
+            )
+        if hasattr(self._model, 'actuation_matrix'):
+            self._model.actuation_matrix.requires_grad_(
+                self._training_parameters["train_B"]
+            )
 
         counter = 0
         running_loss = torch.zeros(1)
@@ -596,13 +642,24 @@ class Trainer:
         num_states = self._model.encoder.get_inputsize()
 
         self._model.encoder.requires_grad_(self._training_parameters["train_encoder"])
-        self._model.decoder.requires_grad_(self._training_parameters["train_decoder"])
-        self._model.states_auxiliary.requires_grad_(
-            self._training_parameters["train_states_auxiliary"]
-        )
-        self._model.inputs_auxiliary.requires_grad_(
-            self._training_parameters["train_inputs_auxiliary"]
-        )
+        if hasattr(self._model, 'decoder'):
+            self._model.decoder.requires_grad_(self._training_parameters["train_decoder"])
+        if hasattr(self._model, 'states_auxiliary'):
+            self._model.states_auxiliary.requires_grad_(
+                self._training_parameters["train_states_auxiliary"]
+            )
+        if hasattr(self._model, 'inputs_auxiliary'):
+            self._model.inputs_auxiliary.requires_grad_(
+                self._training_parameters["train_inputs_auxiliary"]
+            )
+        if hasattr(self._model, 'states_matrix'):
+            self._model.states_matrix.requires_grad_(
+                self._training_parameters["train_A"]
+            )
+        if hasattr(self._model, 'actuation_matrix'):
+            self._model.actuation_matrix.requires_grad_(
+                self._training_parameters["train_B"]
+            )
         self.save_model_structure(self._model)
 
         # Log model info
@@ -753,7 +810,7 @@ class Trainer:
             self.axs[1, j].grid(
                 which="both", color="lightgray", linestyle="--", linewidth=0.5
             )
-            self.axs[1, j].set_title("Normalzied phase portraits - State Space")
+            self.axs[1, j].set_title("Normalized phase portrait - State Space")
             self.axs[1, j].legend(loc="best")
 
         plt.tight_layout()
