@@ -22,9 +22,8 @@ logger.info(" Running on %s", device)
 
 """ Adjust Parameters """
 ##################################################################################
-model_name = "catheter_1T_unforced_4.3.2"
-dataset_override = "catheter_1T_unforced_4.3.test" #"catheter_1T_unforced_4.3" #"catheter_1T_forced_5.2.test"
-simulation_time = 1.0
+model_name = "catheter_1T_forced_4.3.1"
+simulation_time = 1.000
 sample_time_override = 2e-3
 # plot_index_list = [2, 21, 51, 61]
 plot_index_list = [2, 5, 7]
@@ -56,14 +55,9 @@ def main():
         raise FileNotFoundError(error_message)
 
     #### load dataset_info json file
-    if dataset_override is not None:
-        datasets_dir = os.path.join(
-            os.getcwd(), "datasets", dataset_override
-        )
-    else:
-        datasets_dir = os.path.join(
-            os.getcwd(), "datasets", model_info["dataset_options"]["dataset_name"]
-        )
+    datasets_dir = os.path.join(
+        os.getcwd(), "datasets", model_info["dataset_options"]["dataset_name"]
+    )
     dataset_info_path = os.path.join(datasets_dir, "dataset_info.json")
     if os.path.isfile(dataset_info_path):
         with open(dataset_info_path, "r") as fp:
@@ -728,6 +722,19 @@ def plot_errors(Xp, X_errors, recon_errors, states_name, save_dir, save=False):
     mag_measure = np.sqrt(sum(Xp[:, :, idx] ** 2 for idx in indices))
     measures = [Xp[:, :, i].flatten() for i in indices]
     measures.append(mag_measure.flatten())
+
+    x_max = np.max(np.abs(Xp), axis=(0,1))
+    error_max = np.max(np.abs(X_errors), axis=(0,1))
+    error_mean = np.mean(np.abs(X_errors), axis=(0,1))
+
+    X_mean_norm_max_errors = np.mean(error_max / x_max)
+    X_rms_norm_max_errors = np.sqrt(np.mean((error_max / x_max)**2))
+    X_mean_norm_mean_errors = np.mean(error_mean / x_max)
+    X_rms_norm_mean_errors = np.sqrt(np.mean((error_mean / x_max)**2))
+
+    print("X_mean_norm_max_errors: {:.6f}".format(X_mean_norm_max_errors))
+    print("X_mean_norm_mean_errors: {:.6f}".format(X_mean_norm_mean_errors))
+
 
     # epsilon = 1e-10
     # measures = [m + epsilon for m in measures]

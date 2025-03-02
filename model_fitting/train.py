@@ -59,7 +59,7 @@ logger.info(" Running on %s", DEVICE)
 
 def main():
     datasets_dir = os.path.join(
-        os.getcwd(), "datasets", dataset_options["dataset_name"]
+        os.getcwd(), "data", dataset_options["dataset_name"]
     )
     dataset_info_path = os.path.join(datasets_dir, "dataset_info.json")
 
