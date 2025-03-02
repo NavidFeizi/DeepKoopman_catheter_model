@@ -1,1 +1,0 @@
-# For installing your project as a package
